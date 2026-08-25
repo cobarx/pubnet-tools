@@ -19,3 +19,9 @@ tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"]
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "z"   # optimize for size, not speed - see docs/decisions/2026-08-25-rust-rewrite-technology-stack.md; this whole exercise started as a binary-size question, and every check is dominated by network I/O anyway, not CPU-bound code

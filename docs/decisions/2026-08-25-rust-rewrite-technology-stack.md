@@ -71,13 +71,17 @@ Solo call — no other stakeholders consulted.
 
 ## Considerations / Revisit if
 
-- **`indicatif`/`console` vs. hand-rolling minimal ANSI output.** Today: both are
-  well-maintained, widely used, and small. Revisit if: binary size analysis (once real
-  business logic is ported and a release build exists) shows either contributing
-  meaningfully to the final size. Then likely: hand-roll spinner/color instead — the
-  actual logic (start/stop a spinner, print colored text) is not complex enough to
-  justify a dependency purely on size-sensitivity grounds if the number turns out to
-  matter more than expected.
+- **`indicatif`/`console` vs. hand-rolling minimal ANSI output.** Today (measured
+  2026-08-25): a full `--release` build (LTO, `codegen-units = 1`, `strip = true`,
+  `opt-level = "z"`) is 5.0MB, dynamically linked only against `libc`/`libm`/`libgcc_s`
+  — no OpenSSL, same dependency shape a distro package for `curl` or `git` would
+  declare. That settles the number this bullet was waiting on: within the originally
+  estimated 5–8MB range (the earlier 2–4MB revision assumed dynamic linking would cost
+  less than it did in practice), and roughly 16–24x smaller than the ~80–120MB Node SEA
+  bundle that was the reason Rust was on the table at all. Revisit if: a future
+  `cargo bloat`-style breakdown shows `indicatif`/`console` specifically, rather than
+  the `reqwest`+`rustls`+`tokio` HTTP/TLS stack (the more likely culprit), driving the
+  size. Then likely: hand-roll spinner/color instead.
 - **`time` vs `chrono`.** Today: `time` was picked for a smaller footprint on a guess,
   not a measurement. Revisit if: the report-timestamp formatting needs turn out to want
   something `time`'s feature set doesn't cover well. Then likely: `chrono` is the
