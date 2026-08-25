@@ -33,6 +33,7 @@ pub enum Severity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Finding {
     pub id: String,
     pub severity: Severity,
@@ -43,6 +44,7 @@ pub struct Finding {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CheckResult<T> {
     pub name: String,
     pub status: CheckStatus,
@@ -86,6 +88,7 @@ impl WifiEncryption {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DnsResolverInfo {
     pub link: String,
     pub current_server: Option<String>,
@@ -108,6 +111,7 @@ pub enum DohProvider {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DohProbe {
     pub provider: DohProvider,
     pub egress_ip: Option<String>,
@@ -133,6 +137,7 @@ impl DnsLeakVerdict {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DnsLeakResult {
     pub system_egress_ip: Option<String>,
     pub probes: Vec<DohProbe>,
@@ -159,6 +164,7 @@ impl CaptivePortalMethod {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CaptivePortalResult {
     pub detected: bool,
     pub method: CaptivePortalMethod,
@@ -168,6 +174,7 @@ pub struct CaptivePortalResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SecurityData {
     pub ssid: Option<String>,
     pub encryption: WifiEncryption,
@@ -182,6 +189,7 @@ pub struct SecurityData {
 // --- Speed ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpeedData {
     pub download_mbps: f64,
     pub upload_mbps: f64,
@@ -215,6 +223,7 @@ impl PingTargetLabel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PingTargetResult {
     pub host: String,
     pub label: PingTargetLabel,
@@ -230,6 +239,7 @@ pub struct PingTargetResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReliabilityData {
     pub targets: Vec<PingTargetResult>,
     pub gateway_reachable: bool,
@@ -239,6 +249,7 @@ pub struct ReliabilityData {
 // --- Topology ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArpNeighbor {
     pub ip: String,
     pub mac: Option<String>,
@@ -249,6 +260,7 @@ pub struct ArpNeighbor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TopologyData {
     pub interface: String,
     pub ip_cidr: String,
@@ -267,6 +279,7 @@ pub enum RiskLevel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScoreResult {
     pub total: u32,
     pub level: RiskLevel,
@@ -274,6 +287,7 @@ pub struct ScoreResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Report {
     pub version: String,
     pub timestamp: String,
