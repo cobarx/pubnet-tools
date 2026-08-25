@@ -9,6 +9,20 @@ pub enum CheckStatus {
     Skipped,
 }
 
+impl CheckStatus {
+    /// Same lowercase form serde uses for JSON - see WifiEncryption::as_str
+    /// and PingTargetLabel::as_str for why `{:?}` isn't used for anything
+    /// rendered to the user.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CheckStatus::Ok => "ok",
+            CheckStatus::Degraded => "degraded",
+            CheckStatus::Failed => "failed",
+            CheckStatus::Skipped => "skipped",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -108,6 +122,16 @@ pub enum DnsLeakVerdict {
     Uncertain,
 }
 
+impl DnsLeakVerdict {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DnsLeakVerdict::Clean => "clean",
+            DnsLeakVerdict::Leaked => "leaked",
+            DnsLeakVerdict::Uncertain => "uncertain",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsLeakResult {
     pub system_egress_ip: Option<String>,
@@ -122,6 +146,16 @@ pub enum CaptivePortalMethod {
     Redirect,
     ContentMismatch,
     None,
+}
+
+impl CaptivePortalMethod {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CaptivePortalMethod::Redirect => "redirect",
+            CaptivePortalMethod::ContentMismatch => "content-mismatch",
+            CaptivePortalMethod::None => "none",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
