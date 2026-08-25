@@ -54,6 +54,23 @@ pub enum WifiEncryption {
     Unknown,
 }
 
+impl WifiEncryption {
+    /// Same form serde uses for JSON - `{:?}` would produce PascalCase
+    /// ("Wpa3", "Wpa2Enterprise") and silently diverge from the TS
+    /// version's finding titles (see PingTargetLabel::as_str for the same
+    /// pattern, caught the same way while porting reliability.rs).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            WifiEncryption::Wpa3 => "WPA3",
+            WifiEncryption::Wpa2 => "WPA2",
+            WifiEncryption::Wpa2Enterprise => "WPA2-Enterprise",
+            WifiEncryption::Wpa => "WPA",
+            WifiEncryption::Open => "Open",
+            WifiEncryption::Unknown => "Unknown",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsResolverInfo {
     pub link: String,
