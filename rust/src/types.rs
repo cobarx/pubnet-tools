@@ -149,6 +149,20 @@ pub enum PingTargetLabel {
     CloudflareDns,
 }
 
+impl PingTargetLabel {
+    /// Same kebab-case form serde uses for JSON, for building stable
+    /// finding IDs (e.g. `reliability.packet-loss.google-dns`) - `{:?}`
+    /// would produce PascalCase and silently diverge from the TS version's
+    /// finding IDs.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PingTargetLabel::Gateway => "gateway",
+            PingTargetLabel::GoogleDns => "google-dns",
+            PingTargetLabel::CloudflareDns => "cloudflare-dns",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PingTargetResult {
     pub host: String,
