@@ -89,6 +89,7 @@ conncheck record         # wraps in asciinema
   - [2026-08-24-ookla-permitted-as-fallback.md](docs/decisions/2026-08-24-ookla-permitted-as-fallback.md) — the narrow exception to open-source-only, and why it hasn't been exercised
   - [2026-08-25-passive-notice-terminal-only-in-json.md](docs/decisions/2026-08-25-passive-notice-terminal-only-in-json.md) — why the passive-ARP notice was dropped from terminal output (proposed, not settled)
   - [2026-08-25-save-off-by-default.md](docs/decisions/2026-08-25-save-off-by-default.md) — why `--save` is now opt-in; there was never a recorded reason for the old default
+  - [2026-08-25-configurable-speed-duration.md](docs/decisions/2026-08-25-configurable-speed-duration.md) — why `--speed-duration`/`-q`/`--quick` exist, why the 10s default is unchanged, why `-f` was avoided
 - [docs/context/](docs/context/) — observed network behavior and domain background; read when debugging a check that behaves unexpectedly on a specific network
   - [network-behavior.md](docs/context/network-behavior.md) — live recon findings that shaped the implementation (captive portals, Quad9 blocking, nmcli quirks, VMware interfaces)
   - [dns-hardening.md](docs/context/dns-hardening.md) — what conncheck's DNS findings mean, how much TLS actually protects against a hostile resolver, how to override DNS globally, and Cloudflare vs Google as a personal choice (not part of conncheck's own leak-detection logic)
