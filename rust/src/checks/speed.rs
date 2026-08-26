@@ -21,7 +21,10 @@ use tokio_tungstenite::tungstenite::Message;
 
 const NDT7_SUBPROTOCOL: &str = "net.measurementlab.ndt.v7";
 const LOCATE_URL: &str = "https://locate.measurementlab.net/v2/nearest/ndt/ndt7";
-const TEST_DURATION: Duration = Duration::from_secs(10);
+/// spec: docs/decisions/2026-08-25-configurable-speed-duration.md
+/// Per-direction window when the caller doesn't override it via
+/// --speed-duration/--quick. Matches ndt7-js's own default.
+pub const DEFAULT_TEST_DURATION: Duration = Duration::from_secs(10);
 const UPLOAD_CHUNK_BYTES: usize = 8192;
 
 pub struct NdtServer {
@@ -78,7 +81,7 @@ struct DirectionResult {
     rtt_samples_ms: Vec<f64>,
 }
 
-async fn measure_direction(url: &str, mode: Mode) -> Result<DirectionResult, String> {
+async fn measure_direction(url: &str, mode: Mode, test_duration: Duration) -> Result<DirectionResult, String> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(
         tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(url)
             .map_err(|e| e.to_string())
@@ -106,7 +109,7 @@ async fn measure_direction(url: &str, mode: Mode) -> Result<DirectionResult, Str
 
     let mut bytes: u64 = 0;
     let mut rtts: Vec<f64> = Vec::new();
-    let deadline = tokio::time::sleep(TEST_DURATION);
+    let deadline = tokio::time::sleep(test_duration);
     tokio::pin!(deadline);
 
     loop {
@@ -159,7 +162,7 @@ fn failed(start: Instant, message: String) -> CheckResult<SpeedData> {
     }
 }
 
-pub async fn check_speed<L, LFut>(locate: &L) -> CheckResult<SpeedData>
+pub async fn check_speed<L, LFut>(locate: &L, test_duration: Duration) -> CheckResult<SpeedData>
 where
     L: Fn() -> LFut,
     LFut: std::future::Future<Output = Result<NdtServer, String>>,
@@ -171,11 +174,11 @@ where
         Err(e) => return failed(start, e),
     };
 
-    let download = match measure_direction(&server.download_url, Mode::Download).await {
+    let download = match measure_direction(&server.download_url, Mode::Download, test_duration).await {
         Ok(d) => d,
         Err(e) => return failed(start, e),
     };
-    let upload = match measure_direction(&server.upload_url, Mode::Upload).await {
+    let upload = match measure_direction(&server.upload_url, Mode::Upload, test_duration).await {
         Ok(u) => u,
         Err(e) => return failed(start, e),
     };
@@ -248,7 +251,7 @@ mod tests {
     async fn locate_failure_is_reported_as_failed_not_panicking() {
         let locate = || async { Err::<NdtServer, String>("no server available".to_string()) };
 
-        let result = check_speed(&locate).await;
+        let result = check_speed(&locate, DEFAULT_TEST_DURATION).await;
 
         assert_eq!(result.status, CheckStatus::Failed);
         assert!(result.data.is_none());

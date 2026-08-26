@@ -4,7 +4,7 @@
 
 use crate::checks::reliability::check_reliability;
 use crate::checks::security::check_security;
-use crate::checks::speed::{check_speed, default_locate};
+use crate::checks::speed::{check_speed, default_locate, DEFAULT_TEST_DURATION};
 use crate::checks::topology::check_topology;
 use crate::exec::{cmd, exec_cmd};
 use crate::output::renderer::render_report;
@@ -53,6 +53,14 @@ struct Cli {
     /// (repeatable; may not exclude both)
     #[arg(long = "exclude-target")]
     exclude_target: Vec<String>,
+    /// seconds per direction (download, upload) for the speed test
+    /// (default: 10; not combinable with --quick)
+    #[arg(long = "speed-duration", value_name = "SECONDS")]
+    speed_duration: Option<u64>,
+    /// shorthand for --speed-duration 3 - faster, less accurate
+    /// (not combinable with --speed-duration)
+    #[arg(short = 'q', long = "quick")]
+    quick: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -151,6 +159,26 @@ fn parse_exclude_targets(values: &[String]) -> Result<Vec<PingTargetLabel>, Stri
     Ok(labels)
 }
 
+const QUICK_TEST_DURATION: Duration = Duration::from_secs(3);
+
+/// spec: docs/decisions/2026-08-25-configurable-speed-duration.md
+/// --speed-duration and --quick are two ways to set the same thing, so
+/// combining them is a usage error rather than picking a winner - same
+/// shape as resolve_check_selection's --only/--no-<check> conflict.
+fn resolve_speed_duration(seconds: Option<u64>, quick: bool) -> Result<Duration, String> {
+    if quick && seconds.is_some() {
+        return Err("--quick cannot be combined with --speed-duration".to_string());
+    }
+    if quick {
+        return Ok(QUICK_TEST_DURATION);
+    }
+    match seconds {
+        None => Ok(DEFAULT_TEST_DURATION),
+        Some(0) => Err("--speed-duration must be at least 1".to_string()),
+        Some(s) => Ok(Duration::from_secs(s)),
+    }
+}
+
 fn finish_spinner(spinner: &ProgressBar, status: CheckStatus, text: &str) {
     let symbol = match status {
         CheckStatus::Ok => console::style("✔").green(),
@@ -195,11 +223,11 @@ fn excluded_result<T>(name: &str) -> CheckResult<T> {
     }
 }
 
-#[derive(Default)]
 pub struct RunAuditOptions {
     pub only: Option<Vec<CheckName>>,
     pub quiet: bool,
     pub exclude_targets: Vec<PingTargetLabel>,
+    pub speed_duration: Duration,
 }
 
 pub async fn run_audit(options: RunAuditOptions) -> Report {
@@ -256,7 +284,7 @@ pub async fn run_audit(options: RunAuditOptions) -> Report {
         },
         async {
             if should_run(CheckName::Speed) {
-                check_speed(&default_locate).await
+                check_speed(&default_locate, options.speed_duration).await
             } else {
                 excluded_result("speed")
             }
@@ -326,8 +354,15 @@ async fn run_command(cli: &Cli) -> i32 {
             return 2;
         }
     };
+    let speed_duration = match resolve_speed_duration(cli.speed_duration, cli.quick) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
 
-    let report = run_audit(RunAuditOptions { only, quiet: cli.json, exclude_targets }).await;
+    let report = run_audit(RunAuditOptions { only, quiet: cli.json, exclude_targets, speed_duration }).await;
 
     if cli.json {
         println!("{}", serde_json::to_string_pretty(&report).expect("Report serialization should never fail"));
@@ -501,5 +536,32 @@ mod tests {
     #[test]
     fn parse_exclude_targets_empty_is_fine() {
         assert_eq!(parse_exclude_targets(&[]).unwrap(), vec![]);
+    }
+
+    // --- resolve_speed_duration ---
+
+    #[test]
+    fn neither_flag_is_the_default_duration() {
+        assert_eq!(resolve_speed_duration(None, false).unwrap(), DEFAULT_TEST_DURATION);
+    }
+
+    #[test]
+    fn quick_is_the_quick_preset() {
+        assert_eq!(resolve_speed_duration(None, true).unwrap(), QUICK_TEST_DURATION);
+    }
+
+    #[test]
+    fn explicit_seconds_is_used_as_given() {
+        assert_eq!(resolve_speed_duration(Some(7), false).unwrap(), Duration::from_secs(7));
+    }
+
+    #[test]
+    fn zero_seconds_is_rejected() {
+        assert!(resolve_speed_duration(Some(0), false).is_err());
+    }
+
+    #[test]
+    fn quick_and_explicit_seconds_together_is_a_usage_error() {
+        assert!(resolve_speed_duration(Some(5), true).is_err());
     }
 }

@@ -4,10 +4,16 @@
 
 use conncheck::checks::speed::{check_speed, default_locate};
 use conncheck::types::CheckStatus;
+use std::time::Duration;
 
 #[tokio::test]
 async fn returns_data_or_fails_gracefully() {
-    let result = check_speed(&default_locate).await;
+    // spec: docs/decisions/2026-08-25-configurable-speed-duration.md
+    // A short window here is about this test's own runtime and M-Lab
+    // rate-limit pressure from repeated CI/local runs - not a claim
+    // about what duration the real default should be. That's still
+    // DEFAULT_TEST_DURATION (10s) in speed.rs, unchanged by this test.
+    let result = check_speed(&default_locate, Duration::from_secs(3)).await;
 
     if result.status == CheckStatus::Ok {
         let data = result.data.unwrap();
