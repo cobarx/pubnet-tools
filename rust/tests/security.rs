@@ -2,10 +2,10 @@
 //! endpoints. Asserts shape, not exact values - real networks vary.
 //! specs: dns-leak-detection, captive-portal-detection
 
-use conncheck::checks::security::check_security;
-use conncheck::checks::topology::check_topology;
-use conncheck::exec::exec_cmd;
-use conncheck::types::{CaptivePortalMethod, CheckStatus, DnsLeakVerdict};
+use pubnet_tools::checks::security::check_security;
+use pubnet_tools::checks::topology::check_topology;
+use pubnet_tools::exec::exec_cmd;
+use pubnet_tools::types::{CaptivePortalMethod, CheckStatus, DnsLeakVerdict};
 
 #[tokio::test]
 async fn produces_full_security_data_from_real_probes() {

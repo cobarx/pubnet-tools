@@ -1,17 +1,17 @@
 //! Port of src/output/reporter.ts: saves JSON report to
-//! ~/.conncheck/reports/<timestamp>.json, only when --save is passed
+//! ~/.pubnetchk/reports/<timestamp>.json, only when --save is passed
 //! (see docs/decisions/2026-08-25-save-off-by-default.md).
 
 use crate::types::Report;
 use std::path::{Path, PathBuf};
 
 pub fn default_reports_dir() -> PathBuf {
-    dirs_home().join(".conncheck").join("reports")
+    dirs_home().join(".pubnetchk").join("reports")
 }
 
 fn dirs_home() -> PathBuf {
     // No `dirs` crate dependency for one lookup - $HOME is guaranteed on
-    // every platform conncheck targets (see CLAUDE.md: Linux only).
+    // every platform pubnetchk targets (see CLAUDE.md: Linux only).
     std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."))
 }
 

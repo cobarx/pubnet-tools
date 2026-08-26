@@ -1,4 +1,4 @@
 #[tokio::main]
 async fn main() {
-    conncheck::cli::run().await;
+    pubnet_tools::cli::run().await;
 }

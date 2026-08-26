@@ -1,9 +1,9 @@
 //! Contract level: verifies our ping parsing against this machine's real
 //! network. spec: reliability-check-resilience#S1 (real ping, real gateway)
 
-use conncheck::checks::reliability::check_reliability;
-use conncheck::checks::topology::check_topology;
-use conncheck::exec::exec_cmd;
+use pubnet_tools::checks::reliability::check_reliability;
+use pubnet_tools::checks::topology::check_topology;
+use pubnet_tools::exec::exec_cmd;
 
 #[tokio::test]
 async fn pings_the_real_gateway_and_two_external_targets() {
@@ -12,7 +12,7 @@ async fn pings_the_real_gateway_and_two_external_targets() {
 
     let result = check_reliability(gateway_ip.as_deref(), &exec_cmd, &[]).await;
 
-    assert_ne!(result.status, conncheck::types::CheckStatus::Failed);
+    assert_ne!(result.status, pubnet_tools::types::CheckStatus::Failed);
     let data = result.data.expect("expected reliability data");
     assert_eq!(data.targets.len(), 3);
     for target in &data.targets {

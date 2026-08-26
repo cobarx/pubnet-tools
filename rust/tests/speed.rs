@@ -2,8 +2,8 @@
 //! real M-Lab locate API and real download/upload WebSocket servers.
 //! Asserts shape, not exact values - real networks and server load vary.
 
-use conncheck::checks::speed::{check_speed, default_locate};
-use conncheck::types::CheckStatus;
+use pubnet_tools::checks::speed::{check_speed, default_locate};
+use pubnet_tools::types::CheckStatus;
 use std::time::Duration;
 
 #[tokio::test]

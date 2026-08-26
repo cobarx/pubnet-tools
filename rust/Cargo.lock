@@ -224,25 +224,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "conncheck"
-version = "0.1.0"
-dependencies = [
- "clap",
- "console",
- "futures-util",
- "indicatif",
- "rand",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "time",
- "tokio",
- "tokio-tungstenite",
-]
-
-[[package]]
 name = "console"
 version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -938,6 +919,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "pubnet-tools"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "console",
+ "futures-util",
+ "indicatif",
+ "rand",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

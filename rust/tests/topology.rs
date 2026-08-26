@@ -2,10 +2,10 @@
 //! real `ip` output. Asserts shape, not exact values — real networks vary.
 //! spec: topology-default-route-precondition#S1, #S3
 
-use conncheck::exec::exec_cmd;
-use conncheck::checks::topology::check_topology;
-use conncheck::network::is_valid_ipv4;
-use conncheck::types::CheckStatus;
+use pubnet_tools::exec::exec_cmd;
+use pubnet_tools::checks::topology::check_topology;
+use pubnet_tools::network::is_valid_ipv4;
+use pubnet_tools::types::CheckStatus;
 
 #[tokio::test]
 async fn discovers_default_interface_gateway_and_arp_neighbors_passively() {

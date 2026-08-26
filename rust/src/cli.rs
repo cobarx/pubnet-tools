@@ -19,12 +19,12 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const CHECK_NAMES: &[&str] = &["topology", "security", "reliability", "speed"];
 
 #[derive(Parser)]
-#[command(name = "conncheck", version = VERSION, about = "Audit the public WiFi or network you just joined.")]
+#[command(name = "pubnetchk", version = VERSION, about = "Audit the public WiFi or network you just joined.")]
 struct Cli {
     /// print JSON to stdout, suppress spinners
     #[arg(long)]
     json: bool,
-    /// write the report to ~/.conncheck/reports/ (off by default)
+    /// write the report to ~/.pubnetchk/reports/ (off by default)
     #[arg(long)]
     save: bool,
     /// comma list of checks to run: topology,security,reliability,speed
@@ -412,12 +412,12 @@ async fn record_command() -> i32 {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let timestamp = now_iso8601().replace(':', "-");
     let timestamp = timestamp.split('.').next().unwrap_or(&timestamp);
-    let recordings_dir = format!("{home}/.conncheck/recordings");
+    let recordings_dir = format!("{home}/.pubnetchk/recordings");
     let path = format!("{recordings_dir}/{timestamp}.cast");
     let _ = exec_cmd(cmd(&["mkdir", "-p", &recordings_dir])).await;
 
     let args: Vec<String> =
-        if version >= 3 { vec!["rec".to_string(), "--output".to_string(), path, "--".to_string(), "conncheck".to_string()] } else { vec!["rec".to_string(), path, "--".to_string(), "conncheck".to_string()] };
+        if version >= 3 { vec!["rec".to_string(), "--output".to_string(), path, "--".to_string(), "pubnetchk".to_string()] } else { vec!["rec".to_string(), path, "--".to_string(), "pubnetchk".to_string()] };
 
     let status = tokio::process::Command::new("asciinema")
         .args(&args)
