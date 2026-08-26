@@ -10,7 +10,7 @@ use crate::exec::{cmd, exec_cmd};
 use crate::output::renderer::render_report;
 use crate::output::reporter::{default_reports_dir, save_report};
 use crate::scoring::{calculate_score, ScorableResult};
-use crate::types::{CheckResult, CheckStatus, Report};
+use crate::types::{CheckResult, CheckStatus, PingTargetLabel, Report};
 use clap::{Parser, Subcommand};
 use indicatif::ProgressBar;
 use std::time::Duration;
@@ -33,6 +33,26 @@ struct Cli {
     /// exit non-zero on Medium/High risk
     #[arg(long)]
     strict: bool,
+    /// show per-target reliability detail (loss/min/avg/max/jitter),
+    /// not just the condensed local/internet summary
+    #[arg(short, long)]
+    verbose: bool,
+    /// skip the topology check
+    #[arg(long)]
+    no_topology: bool,
+    /// skip the security check
+    #[arg(long)]
+    no_security: bool,
+    /// skip the reliability check
+    #[arg(long)]
+    no_reliability: bool,
+    /// skip the speed check
+    #[arg(long)]
+    no_speed: bool,
+    /// drop a specific external reliability target: google or cloudflare
+    /// (repeatable; may not exclude both)
+    #[arg(long = "exclude-target")]
+    exclude_target: Vec<String>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -69,6 +89,66 @@ fn parse_only(value: &str) -> Result<Vec<CheckName>, String> {
     } else {
         Ok(valid)
     }
+}
+
+pub struct NoFlags {
+    pub no_topology: bool,
+    pub no_security: bool,
+    pub no_reliability: bool,
+    pub no_speed: bool,
+}
+
+/// `--only` and `--no-<check>` are two different ways of saying the same
+/// kind of thing (which checks run) and combining them would mean one
+/// silently overrides the other - rejected outright as a usage error
+/// instead, matching how `speedtest-cli`-style tools with a similar
+/// dual-shape option set (`--server`/`--exclude`) tend to keep the two
+/// mutually exclusive rather than defining an interaction order.
+fn resolve_check_selection(only: &Option<String>, no_flags: &NoFlags) -> Result<Option<Vec<CheckName>>, String> {
+    let any_no = no_flags.no_topology || no_flags.no_security || no_flags.no_reliability || no_flags.no_speed;
+    if only.is_some() && any_no {
+        return Err("--only cannot be combined with --no-<check> flags".to_string());
+    }
+    if let Some(v) = only {
+        return parse_only(v).map(Some);
+    }
+    if any_no {
+        let mut selected = vec![CheckName::Topology, CheckName::Security, CheckName::Reliability, CheckName::Speed];
+        if no_flags.no_topology {
+            selected.retain(|c| *c != CheckName::Topology);
+        }
+        if no_flags.no_security {
+            selected.retain(|c| *c != CheckName::Security);
+        }
+        if no_flags.no_reliability {
+            selected.retain(|c| *c != CheckName::Reliability);
+        }
+        if no_flags.no_speed {
+            selected.retain(|c| *c != CheckName::Speed);
+        }
+        return Ok(Some(selected));
+    }
+    Ok(None)
+}
+
+/// spec-lite (see resolve_check_selection's doc comment for the sibling
+/// mutual-exclusion reasoning): excluding both external targets would
+/// leave `internet_reachable` untestable by anything, which is different
+/// from "false" - rejected rather than silently producing a misleading
+/// result. Mirrors speedtest-cli's `--exclude <server>`, repeatable.
+fn parse_exclude_targets(values: &[String]) -> Result<Vec<PingTargetLabel>, String> {
+    let mut labels = Vec::new();
+    for v in values {
+        match v.as_str() {
+            "google" => labels.push(PingTargetLabel::GoogleDns),
+            "cloudflare" => labels.push(PingTargetLabel::CloudflareDns),
+            other => return Err(format!("--exclude-target: unknown target '{other}' (expected google or cloudflare)")),
+        }
+    }
+    if labels.contains(&PingTargetLabel::GoogleDns) && labels.contains(&PingTargetLabel::CloudflareDns) {
+        return Err("--exclude-target cannot exclude both google and cloudflare - internet reachability would be untestable".to_string());
+    }
+    Ok(labels)
 }
 
 fn finish_spinner(spinner: &ProgressBar, status: CheckStatus, text: &str) {
@@ -119,6 +199,7 @@ fn excluded_result<T>(name: &str) -> CheckResult<T> {
 pub struct RunAuditOptions {
     pub only: Option<Vec<CheckName>>,
     pub quiet: bool,
+    pub exclude_targets: Vec<PingTargetLabel>,
 }
 
 pub async fn run_audit(options: RunAuditOptions) -> Report {
@@ -168,7 +249,7 @@ pub async fn run_audit(options: RunAuditOptions) -> Report {
         },
         async {
             if should_run(CheckName::Reliability) {
-                check_reliability(gateway_ip.as_deref(), &exec_cmd).await
+                check_reliability(gateway_ip.as_deref(), &exec_cmd, &options.exclude_targets).await
             } else {
                 excluded_result("reliability")
             }
@@ -225,23 +306,33 @@ fn now_iso8601() -> String {
 }
 
 async fn run_command(cli: &Cli) -> i32 {
-    let only = match &cli.only {
-        Some(v) => match parse_only(v) {
-            Ok(names) => Some(names),
-            Err(e) => {
-                eprintln!("{e}");
-                return 2;
-            }
-        },
-        None => None,
+    let no_flags = NoFlags {
+        no_topology: cli.no_topology,
+        no_security: cli.no_security,
+        no_reliability: cli.no_reliability,
+        no_speed: cli.no_speed,
+    };
+    let only = match resolve_check_selection(&cli.only, &no_flags) {
+        Ok(only) => only,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    let exclude_targets = match parse_exclude_targets(&cli.exclude_target) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
     };
 
-    let report = run_audit(RunAuditOptions { only, quiet: cli.json }).await;
+    let report = run_audit(RunAuditOptions { only, quiet: cli.json, exclude_targets }).await;
 
     if cli.json {
         println!("{}", serde_json::to_string_pretty(&report).expect("Report serialization should never fail"));
     } else {
-        println!("{}", render_report(&report));
+        println!("{}", render_report(&report, cli.verbose));
     }
 
     if cli.save {
@@ -356,5 +447,59 @@ mod tests {
         assert_eq!(combined_status(&[CheckStatus::Ok, CheckStatus::Degraded]), CheckStatus::Degraded);
         assert_eq!(combined_status(&[CheckStatus::Ok, CheckStatus::Failed, CheckStatus::Degraded]), CheckStatus::Failed);
         assert_eq!(combined_status(&[CheckStatus::Ok, CheckStatus::Ok]), CheckStatus::Ok);
+    }
+
+    // --- resolve_check_selection ---
+
+    fn no_flags() -> NoFlags {
+        NoFlags { no_topology: false, no_security: false, no_reliability: false, no_speed: false }
+    }
+
+    #[test]
+    fn no_only_no_no_flags_runs_everything() {
+        let result = resolve_check_selection(&None, &no_flags()).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn only_alone_still_works_as_before() {
+        let result = resolve_check_selection(&Some("topology,speed".to_string()), &no_flags()).unwrap();
+        assert_eq!(result, Some(vec![CheckName::Topology, CheckName::Speed]));
+    }
+
+    #[test]
+    fn no_flags_alone_exclude_from_the_full_set() {
+        let flags = NoFlags { no_security: true, no_speed: true, ..no_flags() };
+        let result = resolve_check_selection(&None, &flags).unwrap();
+        assert_eq!(result, Some(vec![CheckName::Topology, CheckName::Reliability]));
+    }
+
+    #[test]
+    fn only_and_no_flags_together_is_a_usage_error() {
+        let flags = NoFlags { no_speed: true, ..no_flags() };
+        assert!(resolve_check_selection(&Some("topology".to_string()), &flags).is_err());
+    }
+
+    // --- parse_exclude_targets ---
+
+    #[test]
+    fn parse_exclude_targets_accepts_known_names() {
+        let result = parse_exclude_targets(&["google".to_string()]).unwrap();
+        assert_eq!(result, vec![PingTargetLabel::GoogleDns]);
+    }
+
+    #[test]
+    fn parse_exclude_targets_rejects_unknown_name() {
+        assert!(parse_exclude_targets(&["bogus".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_exclude_targets_rejects_excluding_both() {
+        assert!(parse_exclude_targets(&["google".to_string(), "cloudflare".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_exclude_targets_empty_is_fine() {
+        assert_eq!(parse_exclude_targets(&[]).unwrap(), vec![]);
     }
 }

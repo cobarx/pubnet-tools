@@ -124,7 +124,31 @@ fn render_security_section(report: &Report) -> Vec<String> {
     lines
 }
 
-fn render_performance_section(report: &Report) -> Vec<String> {
+fn ms_or_dash(value: Option<f64>) -> String {
+    value.map(|v| format!("{v:.1}ms")).unwrap_or_else(|| "—".to_string())
+}
+
+/// The per-target detail --verbose restores: everything summarize_reliability
+/// condenses away for the default view (per-target min/avg/max/jitter, not
+/// just loss+avg latency aggregated into Local/Internet).
+fn render_target_detail(rel: &ReliabilityData) -> Vec<String> {
+    let mut lines = vec!["  Targets:".to_string()];
+    for t in &rel.targets {
+        lines.push(format!(
+            "    {} ({}): {:.0}% loss, min {}, avg {}, max {}, jitter {}",
+            style(t.label.as_str()).bold(),
+            t.host,
+            t.packet_loss_pct,
+            ms_or_dash(t.min_ms),
+            ms_or_dash(t.avg_ms),
+            ms_or_dash(t.max_ms),
+            ms_or_dash(t.jitter_ms),
+        ));
+    }
+    lines
+}
+
+fn render_performance_section(report: &Report, verbose: bool) -> Vec<String> {
     let mut lines = vec!["Performance:".to_string()];
     let rel = &report.reliability.data;
     let speed = &report.speed.data;
@@ -133,6 +157,9 @@ fn render_performance_section(report: &Report) -> Vec<String> {
         let summary = summarize_reliability(rel);
         lines.push(render_hop("Local", summary.local));
         lines.push(render_hop("Internet", summary.internet));
+        if verbose {
+            lines.extend(render_target_detail(rel));
+        }
     } else {
         lines.push(format!("  Reliability: {}", report.reliability.status.as_str()));
     }
@@ -151,7 +178,7 @@ fn render_performance_section(report: &Report) -> Vec<String> {
     lines
 }
 
-pub fn render_report(report: &Report) -> String {
+pub fn render_report(report: &Report, verbose: bool) -> String {
     let level_style = level_style(report.score.level);
     let mut lines = vec![
         String::new(),
@@ -162,7 +189,7 @@ pub fn render_report(report: &Report) -> String {
     lines.push(String::new());
     lines.extend(render_security_section(report));
     lines.push(String::new());
-    lines.extend(render_performance_section(report));
+    lines.extend(render_performance_section(report, verbose));
     lines.push(String::new());
 
     lines.join("\n")
@@ -325,14 +352,14 @@ mod tests {
 
     #[test]
     fn includes_risk_level_and_score() {
-        let output = render_report(&base_report());
+        let output = render_report(&base_report(), false);
         assert!(output.contains("High"));
         assert!(output.contains("40"));
     }
 
     #[test]
     fn orders_sections_network_security_performance() {
-        let output = render_report(&base_report());
+        let output = render_report(&base_report(), false);
         let network_idx = output.find("Network:").unwrap();
         let security_idx = output.find("Security:").unwrap();
         let perf_idx = output.find("Performance:").unwrap();
@@ -342,7 +369,7 @@ mod tests {
 
     #[test]
     fn network_section_has_interface_gateway_ssid_channel_no_passive_notice() {
-        let output = render_report(&base_report());
+        let output = render_report(&base_report(), false);
         let lines: Vec<&str> = output.lines().collect();
         let network_idx = lines.iter().position(|l| *l == "Network:").unwrap();
         let security_idx = lines.iter().position(|l| *l == "Security:").unwrap();
@@ -371,7 +398,7 @@ mod tests {
 
     #[test]
     fn security_section_has_only_dns_leak_and_captive_portal() {
-        let output = render_report(&base_report());
+        let output = render_report(&base_report(), false);
         assert!(output.contains("uncertain"));
 
         let lines: Vec<&str> = output.lines().collect();
@@ -385,7 +412,7 @@ mod tests {
 
     #[test]
     fn security_calls_out_inadequate_wifi_encryption() {
-        let output = render_report(&base_report());
+        let output = render_report(&base_report(), false);
         let lines: Vec<&str> = output.lines().collect();
         let security_idx = lines.iter().position(|l| *l == "Security:").unwrap();
         let perf_idx = lines.iter().position(|l| *l == "Performance:").unwrap();
@@ -403,7 +430,7 @@ mod tests {
             title: "WiFi uses WPA3".to_string(),
             detail: None,
         }];
-        let output = render_report(&report);
+        let output = render_report(&report, false);
         let lines: Vec<&str> = output.lines().collect();
         let security_idx = lines.iter().position(|l| *l == "Security:").unwrap();
         let perf_idx = lines.iter().position(|l| *l == "Performance:").unwrap();
@@ -430,13 +457,13 @@ mod tests {
                 detail: None,
             },
         ];
-        let output = render_report(&report);
+        let output = render_report(&report, false);
         assert!(!output.contains("DNS leak detected"));
     }
 
     #[test]
     fn performance_section_shows_local_internet_speed_no_jitter_no_per_target() {
-        let output = render_report(&base_report());
+        let output = render_report(&base_report(), false);
         assert!(output.contains("Local"));
         assert!(output.contains("Internet"));
         assert!(output.contains("46.6"));
@@ -444,6 +471,25 @@ mod tests {
         assert!(!output.contains("Jitter"));
         assert!(!output.contains("google-dns"));
         assert!(!output.contains("cloudflare-dns"));
+    }
+
+    #[test]
+    fn verbose_adds_per_target_detail_default_view_omits_it() {
+        let quiet = render_report(&base_report(), false);
+        assert!(!quiet.contains("Targets:"));
+        assert!(!quiet.contains("jitter"));
+
+        let output = render_report(&base_report(), true);
+        assert!(output.contains("Targets:"));
+        assert!(output.contains("gateway"));
+        assert!(output.contains("google-dns"));
+        assert!(output.contains("cloudflare-dns"));
+        assert!(output.contains("1.1.1.1"));
+        assert!(output.contains("min"));
+        assert!(output.contains("jitter"));
+        // still condensed Local/Internet lines above the detail block
+        assert!(output.contains("Local"));
+        assert!(output.contains("Internet"));
     }
 
     #[test]
@@ -457,7 +503,7 @@ mod tests {
             findings: vec![],
             duration_ms: 1,
         };
-        let output = render_report(&report);
+        let output = render_report(&report, false);
         assert!(output.contains("skipped"));
     }
 }

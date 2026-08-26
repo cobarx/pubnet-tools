@@ -10,7 +10,7 @@ async fn pings_the_real_gateway_and_two_external_targets() {
     let topology = check_topology(&exec_cmd).await;
     let gateway_ip = topology.data.map(|d| d.gateway);
 
-    let result = check_reliability(gateway_ip.as_deref(), &exec_cmd).await;
+    let result = check_reliability(gateway_ip.as_deref(), &exec_cmd, &[]).await;
 
     assert_ne!(result.status, conncheck::types::CheckStatus::Failed);
     let data = result.data.expect("expected reliability data");

@@ -116,9 +116,16 @@ fn findings_for(targets: &[PingTargetResult]) -> Vec<Finding> {
 /// spec: reliability-check-resilience
 /// One target's failure never aborts the others - every target is pinged
 /// independently and its result reported regardless of the others' outcome.
+///
+/// `exclude` drops specific external targets (e.g. `--exclude-target`)
+/// from the ping set entirely - the gateway is never excludable this way.
+/// Validating "don't exclude every external target" is the CLI layer's
+/// job (cli.rs), not this function's - this trusts its input the same way
+/// the rest of the check trusts a well-formed `gateway_ip`.
 pub async fn check_reliability<F, Fut>(
     gateway_ip: Option<&str>,
     exec: &F,
+    exclude: &[PingTargetLabel],
 ) -> CheckResult<ReliabilityData>
 where
     F: Fn(Vec<String>) -> Fut,
@@ -137,12 +144,11 @@ where
         };
     };
 
-    let (gateway_target, google_target, cloudflare_target) = tokio::join!(
-        ping_target(exec, gateway_ip, PingTargetLabel::Gateway),
-        ping_target(exec, EXTERNAL_TARGETS[0].0, EXTERNAL_TARGETS[0].1),
-        ping_target(exec, EXTERNAL_TARGETS[1].0, EXTERNAL_TARGETS[1].1),
-    );
-    let targets = vec![gateway_target, google_target, cloudflare_target];
+    let mut futures = vec![ping_target(exec, gateway_ip, PingTargetLabel::Gateway)];
+    for (host, label) in EXTERNAL_TARGETS.iter().filter(|(_, l)| !exclude.contains(l)) {
+        futures.push(ping_target(exec, host, *label));
+    }
+    let targets = futures_util::future::join_all(futures).await;
 
     let gateway_reachable =
         targets.iter().find(|t| t.label == PingTargetLabel::Gateway).map(|t| t.reachable).unwrap_or(false);
@@ -198,7 +204,7 @@ mod tests {
             async { Ok(exec_result("")) }
         };
 
-        let result = check_reliability(None, &exec).await;
+        let result = check_reliability(None, &exec, &[]).await;
 
         assert_eq!(result.status, CheckStatus::Skipped);
         assert!(result.data.is_none());
@@ -210,7 +216,7 @@ mod tests {
     async fn all_three_reachable_is_ok() {
         let exec = |_: Vec<String>| async { Ok(exec_result(&reachable_output())) };
 
-        let result = check_reliability(Some("192.168.5.1"), &exec).await;
+        let result = check_reliability(Some("192.168.5.1"), &exec, &[]).await;
 
         assert_eq!(result.status, CheckStatus::Ok);
         let data = result.data.unwrap();
@@ -236,7 +242,7 @@ mod tests {
             }
         };
 
-        let result = check_reliability(Some("192.168.5.1"), &exec).await;
+        let result = check_reliability(Some("192.168.5.1"), &exec, &[]).await;
 
         assert_eq!(result.status, CheckStatus::Degraded);
         let data = result.data.unwrap();
@@ -253,7 +259,7 @@ mod tests {
     async fn no_target_reachable_is_degraded_not_failed() {
         let exec = |_: Vec<String>| async { Ok(exec_result(&unreachable_output())) };
 
-        let result = check_reliability(Some("192.168.5.1"), &exec).await;
+        let result = check_reliability(Some("192.168.5.1"), &exec, &[]).await;
 
         assert_eq!(result.status, CheckStatus::Degraded);
         let data = result.data.unwrap();
@@ -264,5 +270,43 @@ mod tests {
             assert_eq!(target.packet_loss_pct, 100.0);
             assert!(!target.reachable);
         }
+    }
+
+    #[tokio::test]
+    async fn excluded_external_target_is_not_pinged_at_all() {
+        let calls: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        let exec = |c: Vec<String>| {
+            calls.lock().unwrap().push(c.last().unwrap().clone());
+            async { Ok(exec_result(&reachable_output())) }
+        };
+
+        let result = check_reliability(Some("192.168.5.1"), &exec, &[PingTargetLabel::GoogleDns]).await;
+
+        let data = result.data.unwrap();
+        assert_eq!(data.targets.len(), 2);
+        assert!(!data.targets.iter().any(|t| t.label == PingTargetLabel::GoogleDns));
+        assert!(data.targets.iter().any(|t| t.label == PingTargetLabel::CloudflareDns));
+        assert!(!calls.lock().unwrap().contains(&"8.8.8.8".to_string()));
+    }
+
+    #[tokio::test]
+    async fn internet_reachable_reflects_only_the_remaining_external_target() {
+        let exec = |c: Vec<String>| {
+            let host = c.last().unwrap().clone();
+            async move {
+                let output = if host == "1.1.1.1" { unreachable_output() } else { reachable_output() };
+                Ok(exec_result(&output))
+            }
+        };
+
+        let result =
+            check_reliability(Some("192.168.5.1"), &exec, &[PingTargetLabel::CloudflareDns]).await;
+
+        let data = result.data.unwrap();
+        assert_eq!(data.targets.len(), 2);
+        // Only google-dns remains as the external target, and it's reachable
+        // in this fixture, so internet_reachable should be true regardless
+        // of what the excluded cloudflare-dns target would have reported.
+        assert!(data.internet_reachable);
     }
 }
