@@ -36,11 +36,13 @@ conncheck
 ## Development setup
 
 ```bash
-# Working directory. Note: /home/maxwell/Projects/ConnectionChecker is currently a
-# symlink into the Google Drive Insync path below, not a separate copy — the original
-# "avoid Insync sync races" isolation this comment used to describe isn't actually in
-# effect. npm install has worked fine here so far; if sync-related flakiness shows up,
-# that symlink is why.
+# Working directory. Note: /home/maxwell/Projects/ConnectionChecker is a symlink into
+# the Google Drive Insync path below, not a separate copy — but isolation from sync
+# races is real anyway: `insync ignore-rules list` shows node_modules (and, as of
+# 2026-08-25, target for the Rust rewrite) are excluded as global gitignore-style
+# patterns at the Insync application level, not via directory choice. If a future
+# build tool adds another heavy/ephemeral output directory, add it the same way
+# (`insync ignore-rules add <dirname>`) rather than relying on working-directory tricks.
 cd /home/maxwell/Projects/ConnectionChecker
 
 npm install
