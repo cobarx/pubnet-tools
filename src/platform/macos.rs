@@ -128,7 +128,7 @@ pub fn parse_scutil_dns(raw: &str, iface: &str) -> Option<DnsResolverInfo> {
     let mut block_servers: Vec<String> = Vec::new();
     let mut block_iface: Option<String> = None;
 
-    let mut flush = |servers: &mut Vec<String>, found_iface: &mut Option<String>| -> Option<DnsResolverInfo> {
+    let flush = |servers: &mut Vec<String>, found_iface: &mut Option<String>| -> Option<DnsResolverInfo> {
         if found_iface.as_deref() == Some(iface) && !servers.is_empty() {
             Some(DnsResolverInfo {
                 link: iface.to_string(),
