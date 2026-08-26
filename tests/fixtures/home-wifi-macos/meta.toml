@@ -1,0 +1,5 @@
+context      = "home-wifi-macos"
+captured_at  = "2026-08-26T22:04:30Z"
+os           = "Darwin 25.4.0"
+interface    = "en0"
+notes        = "Home Google WiFi, WPA2, en0, macOS Darwin 25.4, USB-C Ethernet disconnected"

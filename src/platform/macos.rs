@@ -58,8 +58,10 @@ pub fn parse_arp(raw: &str, iface: &str, gateway_ip: Option<&str>) -> Vec<ArpNei
         let Some(caps) = ARP_ENTRY_RE.captures(line) else { continue };
         let ip = caps[1].to_string();
         let mac_str = &caps[2];
-        // "ff:ff:ff:ff:ff:ff" is broadcast — skip
-        if mac_str == "ff:ff:ff:ff:ff:ff" {
+        // Skip broadcast (ff:ff:ff:ff:ff:ff) and multicast (I/G bit set in first octet)
+        let first_byte = u8::from_str_radix(mac_str.split(':').next().unwrap_or("0"), 16)
+            .unwrap_or(0);
+        if first_byte & 1 != 0 {
             continue;
         }
         let mac = Some(mac_str.to_string());
@@ -241,6 +243,68 @@ impl PlatformProbe for MacProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Fixture helpers — load real captured output from tests/fixtures/<context>/<file>
+    macro_rules! fixture {
+        ($context:literal, $file:literal) => {
+            include_str!(concat!(
+                "../../tests/fixtures/",
+                $context,
+                "/",
+                $file
+            ))
+        };
+    }
+
+    // --- Fixture-based tests: home-wifi-macos (en0, WPA2/DHCP, Google router) ---
+
+    #[test]
+    fn fixture_route_get_parses_home_wifi_macos() {
+        let raw = fixture!("home-wifi-macos", "route_-n_get_default.txt");
+        let result = parse_route_get(raw).unwrap();
+        assert_eq!(result.gateway, "192.168.86.1");
+        assert_eq!(result.device, "en0");
+    }
+
+    #[test]
+    fn fixture_ifconfig_parses_home_wifi_macos() {
+        let raw = fixture!("home-wifi-macos", "ifconfig_en0.txt");
+        let result = parse_ifconfig(raw).unwrap();
+        assert_eq!(result.ip, "192.168.86.247");
+        assert_eq!(result.prefix, 24);
+    }
+
+    #[test]
+    fn fixture_arp_parses_home_wifi_macos_excludes_multicast_and_broadcast() {
+        let raw = fixture!("home-wifi-macos", "arp_-an_-i_en0.txt");
+        let neighbors = parse_arp(raw, "en0", Some("192.168.86.1"));
+        // No multicast (1:0:5e:...) or broadcast (ff:ff:...) MACs in results
+        for n in &neighbors {
+            let mac = n.mac.as_deref().unwrap_or("");
+            assert_ne!(mac, "ff:ff:ff:ff:ff:ff", "broadcast should be filtered");
+            let first_byte = u8::from_str_radix(mac.split(':').next().unwrap_or("0"), 16)
+                .unwrap_or(0);
+            assert_eq!(first_byte & 1, 0, "multicast MAC should be filtered: {mac}");
+        }
+        // Gateway must be present
+        assert!(neighbors.iter().any(|n| n.is_gateway));
+    }
+
+    #[test]
+    fn fixture_scutil_dns_parses_home_wifi_macos() {
+        let raw = fixture!("home-wifi-macos", "scutil_--dns.txt");
+        // Contains a "for scoped queries" section — parser must return the first match
+        let result = parse_scutil_dns(raw, "en0").unwrap();
+        assert_eq!(result.link, "en0");
+        assert_eq!(result.current_server, Some("192.168.86.1".to_string()));
+    }
+
+    #[test]
+    fn fixture_networksetup_identifies_en0_as_wifi() {
+        let raw = fixture!("home-wifi-macos", "networksetup_-listallhardwareports.txt");
+        assert!(is_wifi_hardware_port(raw, "en0"));
+        assert!(!is_wifi_hardware_port(raw, "en1")); // Thunderbolt 1, not WiFi
+    }
 
     #[test]
     fn parse_route_get_extracts_gateway_and_interface() {
