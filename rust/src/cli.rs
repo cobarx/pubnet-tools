@@ -57,7 +57,7 @@ struct Cli {
     /// (default: 10; not combinable with --quick)
     #[arg(long = "speed-duration", value_name = "SECONDS")]
     speed_duration: Option<u64>,
-    /// shorthand for --speed-duration 3 - faster, less accurate
+    /// shorthand for --speed-duration 4 - faster, less accurate
     /// (not combinable with --speed-duration)
     #[arg(short = 'q', long = "quick")]
     quick: bool,
@@ -159,7 +159,7 @@ fn parse_exclude_targets(values: &[String]) -> Result<Vec<PingTargetLabel>, Stri
     Ok(labels)
 }
 
-const QUICK_TEST_DURATION: Duration = Duration::from_secs(3);
+const QUICK_TEST_DURATION: Duration = Duration::from_secs(4);
 
 /// spec: docs/decisions/2026-08-25-configurable-speed-duration.md
 /// --speed-duration and --quick are two ways to set the same thing, so

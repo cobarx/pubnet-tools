@@ -31,7 +31,7 @@ constant. The CLI exposes two ways to set it, mutually exclusive (usage error, e
 code 2, if both given — same shape as `--only`/`--no-<check>`):
 
 - `--speed-duration <SECONDS>` — exact control, per direction. Rejects `0`.
-- `-q, --quick` — preset shorthand for `--speed-duration 3`.
+- `-q, --quick` — preset shorthand for `--speed-duration 4`.
 
 Default stays 10 seconds per direction when neither flag is given — unchanged from
 today, and consistent with `ndt7-js`'s own default.
@@ -40,7 +40,7 @@ today, and consistent with `ndt7-js`'s own default.
 
 Shortening the window is a real accuracy tradeoff, not a pure win: shorter samples are
 noisier, and links with bufferbloat or rate-limiting that only shows up after the first
-few seconds will look better than they are on a 3s window than on a 10s one. That's why
+few seconds will look better than they are on a 4s window than on a 10s one. That's why
 this is opt-in via an explicit flag rather than a lowered default — the 10s baseline
 this project already uses is kept as-is, and speed is traded for accuracy only when the
 user asks for it (e.g. iterating on other parts of a run, or a quick sanity check where
@@ -65,9 +65,9 @@ Solo call — no other stakeholders consulted.
 - **`-q` is currently free.** Today: no other flag claims it. Revisit if: a future flag
   has a stronger claim to `-q` than "quick speed test" — unlikely, since it's already
   scoped to the one check that dominates run time.
-- **3 seconds was picked without measurement.** Today: a round, clearly-short number
-  chosen for readability, not derived from data on how noisy a 3s NDT7 sample actually
-  is on this project's typical test networks. Revisit if: real usage shows 3s produces
+- **4 seconds was picked without measurement.** Today: a round, clearly-short number
+  chosen for readability, not derived from data on how noisy a 4s NDT7 sample actually
+  is on this project's typical test networks. Revisit if: real usage shows 4s produces
   numbers users don't trust, or a different value is needed for a different check should
   a "quick mode" broaden beyond just `speed`.
 
