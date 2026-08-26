@@ -2,7 +2,7 @@
 //! terminal sections, condensed local/internet loss+latency, WiFi risk
 //! callout.
 
-use crate::types::{PingTargetLabel, ReliabilityData, Report, RiskLevel, Severity};
+use crate::types::{DnsLeakVerdict, PingTargetLabel, ReliabilityData, Report, RiskLevel, Severity};
 use console::{style, Style};
 
 fn level_style(level: RiskLevel) -> Style {
@@ -92,6 +92,22 @@ fn render_network_section(report: &Report) -> Vec<String> {
     lines
 }
 
+/// spec: discussed 2026-08-25 - "DNS leak" is VPN-testing jargon (a VPN's
+/// tunnel is supposed to carry DNS, and a "leak" means it escaped through
+/// the regular network instead) that doesn't match what this check does:
+/// verifying nothing on the local network is intercepting/rewriting DNS
+/// answers, independent of any VPN. This is terminal-display wording
+/// only, so `DnsLeakVerdict::as_str()`, the JSON field name, and the
+/// underlying spec/decision docs keep the original "dns leak"
+/// terminology; `--json` output and existing docs are unaffected.
+fn describe_dns_leak(verdict: DnsLeakVerdict) -> &'static str {
+    match verdict {
+        DnsLeakVerdict::Clean => "not intercepted",
+        DnsLeakVerdict::Leaked => "intercepted",
+        DnsLeakVerdict::Uncertain => "uncertain",
+    }
+}
+
 fn render_security_section(report: &Report) -> Vec<String> {
     let mut lines = vec!["Security:".to_string()];
     let sec = &report.security.data;
@@ -110,7 +126,7 @@ fn render_security_section(report: &Report) -> Vec<String> {
             };
             lines.push(format!("  {styled}"));
         }
-        lines.push(format!("  DNS leak: {}", sec.dns_leak.verdict.as_str()));
+        lines.push(format!("  DNS check: {}", describe_dns_leak(sec.dns_leak.verdict)));
         let portal = if sec.captive_portal.detected {
             format!("detected ({})", sec.captive_portal.method.as_str())
         } else {
@@ -408,6 +424,19 @@ mod tests {
         assert!(!section.iter().any(|l| l.contains("SSID:")));
         assert!(!section.iter().any(|l| l.contains("Channel:")));
         assert!(!section.iter().any(|l| l.contains("Berkeley-Visitor")));
+    }
+
+    #[test]
+    fn dns_check_uses_plain_language_not_the_raw_leak_jargon() {
+        let mut report = base_report();
+        report.security.data.as_mut().unwrap().dns_leak.verdict = DnsLeakVerdict::Clean;
+        let output = render_report(&report, false);
+        assert!(output.contains("DNS check: not intercepted"));
+        assert!(!output.contains("DNS leak"));
+
+        report.security.data.as_mut().unwrap().dns_leak.verdict = DnsLeakVerdict::Leaked;
+        let output = render_report(&report, false);
+        assert!(output.contains("DNS check: intercepted"));
     }
 
     #[test]
