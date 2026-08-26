@@ -1,6 +1,5 @@
-//! Port of src/utils/network.ts: pure synchronous parsers for shell output
-//! and small classification helpers. No I/O — every function here takes
-//! already-captured text and returns structured data.
+//! Pure synchronous parsers for shell output and small classification helpers.
+//! No I/O — every function takes already-captured text and returns structured data.
 
 use crate::types::{ArpNeighbor, DnsResolverInfo, DnsSource, WifiEncryption};
 use regex::Regex;

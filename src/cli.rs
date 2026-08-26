@@ -1,7 +1,3 @@
-//! Port of src/cli.ts: clap setup, single-spinner orchestration ("Analyzing...",
-//! "All checks passed" / only-the-issues summary), --json/--save/--only/--strict,
-//! and the `record` subcommand.
-
 use crate::checks::reliability::check_reliability;
 use crate::checks::security::check_security;
 use crate::checks::speed::{check_speed, default_locate, DEFAULT_TEST_DURATION};
@@ -231,6 +227,11 @@ pub struct RunAuditOptions {
 }
 
 pub async fn run_audit(options: RunAuditOptions) -> Report {
+    #[cfg(target_os = "linux")]
+    let probe = crate::platform::linux::LinuxProbe;
+    #[cfg(target_os = "macos")]
+    let probe = crate::platform::macos::MacProbe;
+
     let should_run = |name: CheckName| options.only.as_ref().is_none_or(|only| only.contains(&name));
     let will_run_topology = should_run(CheckName::Topology);
     let concurrent_names: Vec<CheckName> =
@@ -254,7 +255,7 @@ pub async fn run_audit(options: RunAuditOptions) -> Report {
         pb
     });
 
-    let topology = if will_run_topology { check_topology(&exec_cmd).await } else { excluded_result("topology") };
+    let topology = if will_run_topology { check_topology(&probe).await } else { excluded_result("topology") };
 
     let gateway_ip = topology.data.as_ref().map(|d| d.gateway.clone());
     let iface = topology.data.as_ref().map(|d| d.interface.clone());
@@ -270,7 +271,7 @@ pub async fn run_audit(options: RunAuditOptions) -> Report {
     let (security, reliability, speed) = tokio::join!(
         async {
             if should_run(CheckName::Security) {
-                check_security(iface.as_deref(), &exec_cmd, &http_client).await
+                check_security(iface.as_deref(), &probe, &http_client).await
             } else {
                 excluded_result("security")
             }

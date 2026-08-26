@@ -1,50 +1,18 @@
 //! Port of src/checks/topology.ts.
 //! spec: topology-default-route-precondition
 
-use crate::exec::{cmd, ExecResult};
-use crate::network::{parse_ip_addr, parse_ip_neigh, parse_ip_route};
+use crate::platform::PlatformProbe;
 use crate::types::{CheckResult, CheckStatus, TopologyData};
-use std::future::Future;
 use std::time::Instant;
 
 const PASSIVE_NOTICE: &str = "Passive ARP cache — no active scan performed.";
 
-fn failed(start: Instant, message: String) -> CheckResult<TopologyData> {
-    CheckResult {
-        name: "topology".to_string(),
-        status: CheckStatus::Failed,
-        data: None,
-        errors: vec![message],
-        findings: vec![],
-        duration_ms: start.elapsed().as_millis() as u64,
-    }
-}
-
 /// spec: topology-default-route-precondition
-/// Sequential: default route determines the interface every other lookup
-/// (and every downstream check's gateway) depends on.
-///
-/// `exec` is generic rather than a trait object — this check (like every
-/// other one) only ever has one concrete exec implementation active at a
-/// time, so static dispatch is enough and avoids `dyn`/boxed-future
-/// ceremony. A spawn failure (exec returning `Err`) is caught here and
-/// turned into a `Failed` status, matching the CheckResult contract's
-/// "checks never throw" rule — TS's version does not actually implement
-/// this catch despite documenting the intent; this is a deliberate,
-/// small correction made during the port, not a divergence to hide.
-pub async fn check_topology<F, Fut>(exec: &F) -> CheckResult<TopologyData>
-where
-    F: Fn(Vec<String>) -> Fut,
-    Fut: Future<Output = std::io::Result<ExecResult>>,
-{
+/// Sequential: default route determines the interface every other lookup depends on.
+pub async fn check_topology<P: PlatformProbe>(probe: &P) -> CheckResult<TopologyData> {
     let start = Instant::now();
 
-    let route_stdout = match exec(cmd(&["ip", "route", "show", "default"])).await {
-        Ok(r) => r.stdout,
-        Err(e) => return failed(start, format!("Failed to run `ip route`: {e}")),
-    };
-
-    let Some(route) = parse_ip_route(&route_stdout) else {
+    let Some(route) = probe.default_route().await else {
         return CheckResult {
             name: "topology".to_string(),
             status: CheckStatus::Skipped,
@@ -55,31 +23,21 @@ where
         };
     };
 
-    let (addr_res, neigh_res) = tokio::join!(
-        exec(cmd(&["ip", "addr", "show", &route.device])),
-        exec(cmd(&["ip", "neigh", "show", "dev", &route.device])),
+    let (addr, neighbors) = tokio::join!(
+        probe.interface_addr(&route.device),
+        probe.arp_neighbors(&route.device, Some(&route.gateway)),
     );
-
-    let addr_stdout = match addr_res {
-        Ok(r) => r.stdout,
-        Err(e) => return failed(start, format!("Failed to run `ip addr`: {e}")),
-    };
-    let neigh_stdout = match neigh_res {
-        Ok(r) => r.stdout,
-        Err(e) => return failed(start, format!("Failed to run `ip neigh`: {e}")),
-    };
-
-    let addr = parse_ip_addr(&addr_stdout);
-    let neighbors = parse_ip_neigh(&neigh_stdout, &route.device, Some(&route.gateway));
 
     let mut errors = Vec::new();
     if addr.is_none() {
         errors.push(format!("Could not determine IP address for {}", route.device));
     }
 
+    let ip_cidr = addr.as_ref().map(|a| format!("{}/{}", a.ip, a.prefix)).unwrap_or_default();
+
     let data = TopologyData {
         interface: route.device,
-        ip_cidr: addr.as_ref().map(|a| format!("{}/{}", a.ip, a.prefix)).unwrap_or_default(),
+        ip_cidr,
         gateway: route.gateway,
         neighbors,
         passive_notice: PASSIVE_NOTICE.to_string(),
@@ -98,53 +56,53 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Mutex;
+    use crate::platform::{AddrInfo, RouteInfo, WifiInfo, PlatformProbe};
+    use crate::types::{ArpNeighbor, DnsResolverInfo};
 
-    fn exec_result(stdout: &str) -> ExecResult {
-        ExecResult { stdout: stdout.to_string(), stderr: String::new(), exit_code: Some(0) }
+    struct MockProbe {
+        route: Option<RouteInfo>,
+        addr: Option<AddrInfo>,
+        neighbors: Vec<ArpNeighbor>,
+    }
+
+    impl PlatformProbe for MockProbe {
+        async fn default_route(&self) -> Option<RouteInfo> { self.route.clone() }
+        async fn interface_addr(&self, _: &str) -> Option<AddrInfo> { self.addr.clone() }
+        async fn arp_neighbors(&self, _: &str, _: Option<&str>) -> Vec<ArpNeighbor> { self.neighbors.clone() }
+        async fn wifi_info(&self) -> Option<WifiInfo> { None }
+        async fn dns_info(&self, _: &str) -> Option<DnsResolverInfo> { None }
+        async fn system_egress_ip(&self) -> Option<String> { None }
+    }
+
+    fn gateway_neighbor() -> ArpNeighbor {
+        ArpNeighbor {
+            ip: "192.168.5.1".to_string(),
+            vendor: Some("TP-Link".to_string()),
+            mac: Some("68:7f:f0:55:77:7b".to_string()),
+            state: "REACHABLE".to_string(),
+            device: "wlan0".to_string(),
+            is_gateway: true,
+        }
     }
 
     // spec: topology-default-route-precondition#S2
     #[tokio::test]
-    async fn no_default_route_is_skipped_and_stops_after_one_call() {
-        let call_count = AtomicUsize::new(0);
-        let calls: Mutex<Vec<Vec<String>>> = Mutex::new(Vec::new());
-        let exec = |c: Vec<String>| {
-            call_count.fetch_add(1, Ordering::SeqCst);
-            calls.lock().unwrap().push(c);
-            async { Ok(exec_result("")) }
-        };
-
-        let result = check_topology(&exec).await;
-
+    async fn no_default_route_is_skipped() {
+        let probe = MockProbe { route: None, addr: None, neighbors: vec![] };
+        let result = check_topology(&probe).await;
         assert_eq!(result.status, CheckStatus::Skipped);
         assert!(result.data.is_none());
         assert!(!result.errors.is_empty());
-        assert_eq!(call_count.load(Ordering::SeqCst), 1);
-        assert_eq!(calls.lock().unwrap()[0], vec!["ip", "route", "show", "default"]);
     }
 
     #[tokio::test]
     async fn default_route_drives_addr_and_neigh_lookups() {
-        let calls: Mutex<Vec<Vec<String>>> = Mutex::new(Vec::new());
-        let exec = |c: Vec<String>| {
-            calls.lock().unwrap().push(c.clone());
-            async move {
-                if c[1] == "route" {
-                    Ok(exec_result(
-                        "default via 192.168.5.1 dev wlan0 proto dhcp src 192.168.5.151 metric 600 ",
-                    ))
-                } else if c[1] == "addr" {
-                    Ok(exec_result("    inet 192.168.5.151/24 brd 192.168.5.255 scope global wlan0"))
-                } else {
-                    Ok(exec_result("192.168.5.1 lladdr 68:7f:f0:55:77:7b REACHABLE "))
-                }
-            }
+        let probe = MockProbe {
+            route: Some(RouteInfo { gateway: "192.168.5.1".to_string(), device: "wlan0".to_string() }),
+            addr: Some(AddrInfo { ip: "192.168.5.151".to_string(), prefix: 24 }),
+            neighbors: vec![gateway_neighbor()],
         };
-
-        let result = check_topology(&exec).await;
-
+        let result = check_topology(&probe).await;
         assert_eq!(result.status, CheckStatus::Ok);
         let data = result.data.unwrap();
         assert_eq!(data.interface, "wlan0");
@@ -154,9 +112,18 @@ mod tests {
         assert!(data.neighbors[0].is_gateway);
         assert_eq!(data.neighbors[0].vendor, Some("TP-Link".to_string()));
         assert_eq!(data.passive_notice, "Passive ARP cache — no active scan performed.");
+    }
 
-        let recorded = calls.lock().unwrap();
-        assert_eq!(recorded[1], vec!["ip", "addr", "show", "wlan0"]);
-        assert_eq!(recorded[2], vec!["ip", "neigh", "show", "dev", "wlan0"]);
+    #[tokio::test]
+    async fn route_found_but_addr_missing_is_degraded() {
+        let probe = MockProbe {
+            route: Some(RouteInfo { gateway: "192.168.5.1".to_string(), device: "wlan0".to_string() }),
+            addr: None,
+            neighbors: vec![],
+        };
+        let result = check_topology(&probe).await;
+        assert_eq!(result.status, CheckStatus::Degraded);
+        assert!(result.data.is_some()); // data still present, ip_cidr just empty
+        assert!(!result.errors.is_empty());
     }
 }

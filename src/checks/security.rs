@@ -1,15 +1,12 @@
-//! Port of src/checks/security.ts.
 //! specs: dns-leak-detection, captive-portal-detection
-//! See docs/decisions/2026-08-24-dns-leak-address-family-matching.md - the
-//! IPv4-only comparison rule applies unchanged here.
+//! See docs/decisions/2026-08-24-dns-leak-address-family-matching.md
 
-use crate::exec::{cmd, ExecResult};
-use crate::network::{extract_remote_ip, ip_family, parse_nmcli_wifi, parse_resolvectl_status, IpFamily};
+use crate::network::{extract_remote_ip, ip_family, IpFamily};
+use crate::platform::PlatformProbe;
 use crate::types::{
     CaptivePortalMethod, CaptivePortalResult, CheckResult, CheckStatus, DnsLeakResult, DnsLeakVerdict,
     DohProbe, DohProvider, Finding, SecurityData, Severity, WifiEncryption,
 };
-use std::future::Future;
 use std::time::{Duration, Instant};
 
 const DOH_TIMEOUT: Duration = Duration::from_secs(8);
@@ -76,15 +73,6 @@ pub fn classify_dns_leak(system_egress_ip: Option<&str>, raw_probes: &[RawDohPro
         leaked: verdict == DnsLeakVerdict::Leaked,
         verdict,
     }
-}
-
-async fn get_system_egress_ip<F, Fut>(exec: &F) -> Option<String>
-where
-    F: Fn(Vec<String>) -> Fut,
-    Fut: Future<Output = std::io::Result<ExecResult>>,
-{
-    let result = exec(cmd(&["resolvectl", "query", "--type=TXT", "whoami.cloudflare.com"])).await.ok()?;
-    extract_remote_ip(&result.stdout)
 }
 
 async fn probe_doh(client: &reqwest::Client, provider: DohProvider) -> RawDohProbe {
@@ -166,13 +154,8 @@ fn canaries() -> Vec<Canary> {
     ]
 }
 
-/// Reqwest's redirect policy is set at Client construction, not per-request
-/// (unlike axios's per-call `maxRedirects: 0`) - a redirect must not be
-/// followed here so the classifier can see it as a redirect rather than
-/// reqwest silently chasing it to whatever it points at. Building a
-/// dedicated client here, rather than threading a caller-configured one
-/// through as a parameter, makes that a property of this function instead
-/// of a contract callers could get wrong.
+/// Reqwest's redirect policy is set at Client construction, not per-request —
+/// a redirect must not be followed so the classifier can see it as a redirect.
 async fn probe_captive_portal() -> CaptivePortalResult {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -294,31 +277,17 @@ fn captive_portal_findings(portal: &CaptivePortalResult) -> Vec<Finding> {
 // Check orchestration
 // ---------------------------------------------------------------------------
 
-pub async fn check_security<F, Fut>(
+pub async fn check_security<P: PlatformProbe>(
     iface: Option<&str>,
-    exec: &F,
+    probe: &P,
     http_client: &reqwest::Client,
-) -> CheckResult<SecurityData>
-where
-    F: Fn(Vec<String>) -> Fut,
-    Fut: Future<Output = std::io::Result<ExecResult>>,
-{
+) -> CheckResult<SecurityData> {
     let start = Instant::now();
 
-    let wifi_stdout = exec(cmd(&["nmcli", "-t", "-f", "active,ssid,security,chan,freq,signal", "dev", "wifi", "list"]))
-        .await
-        .map(|r| r.stdout)
-        .unwrap_or_default();
-    let wifi = parse_nmcli_wifi(&wifi_stdout);
-
-    let mut dns = None;
-    if let Some(iface) = iface {
-        let resolvectl_stdout = exec(cmd(&["resolvectl", "status"])).await.map(|r| r.stdout).unwrap_or_default();
-        dns = parse_resolvectl_status(&resolvectl_stdout, iface);
-    }
-
-    let (system_egress_ip, cloudflare_probe, google_probe, captive_portal) = tokio::join!(
-        get_system_egress_ip(exec),
+    let (wifi, dns, system_egress_ip, cloudflare_probe, google_probe, captive_portal) = tokio::join!(
+        probe.wifi_info(),
+        async { if let Some(iface) = iface { probe.dns_info(iface).await } else { None } },
+        probe.system_egress_ip(),
         probe_doh(http_client, DohProvider::Cloudflare),
         probe_doh(http_client, DohProvider::Google),
         probe_captive_portal(),
@@ -365,8 +334,6 @@ mod tests {
     fn probe(provider: DohProvider, reachable: bool, egress_ip: Option<&str>) -> RawDohProbe {
         RawDohProbe { provider, reachable, egress_ip: egress_ip.map(String::from) }
     }
-
-    // --- classify_dns_leak ---
 
     // spec: dns-leak-detection#S1
     #[test]

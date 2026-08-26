@@ -1,4 +1,3 @@
-//! Port of src/checks/reliability.ts.
 //! spec: reliability-check-resilience
 
 use crate::exec::{cmd, ExecResult};
