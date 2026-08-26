@@ -81,11 +81,13 @@ fn render_network_section(report: &Report) -> Vec<String> {
     }
 
     if let Some(sec) = sec {
-        lines.push(format!("  SSID: {} — {}", sec.ssid.as_deref().unwrap_or("no SSID"), sec.encryption.as_str()));
-        if let Some(channel) = sec.channel {
-            let freq = sec.frequency_mhz.map(|f| format!(" ({f} MHz)")).unwrap_or_default();
-            let signal = sec.signal_percent.map(|s| format!(", Signal: {s}%")).unwrap_or_default();
-            lines.push(format!("  Channel: {channel}{freq}{signal}"));
+        if let Some(ssid) = &sec.ssid {
+            lines.push(format!("  SSID: {} — {}", ssid, sec.encryption.as_str()));
+            if let Some(channel) = sec.channel {
+                let freq = sec.frequency_mhz.map(|f| format!(" ({f} MHz)")).unwrap_or_default();
+                let signal = sec.signal_percent.map(|s| format!(", Signal: {s}%")).unwrap_or_default();
+                lines.push(format!("  Channel: {channel}{freq}{signal}"));
+            }
         }
     }
 
@@ -410,6 +412,21 @@ mod tests {
         assert!(lines[channel_idx].contains('6'));
         assert!(lines[channel_idx].contains("2437"));
         assert!(lines[channel_idx].contains("80%"));
+    }
+
+    #[test]
+    fn network_section_omits_ssid_and_channel_when_no_wifi() {
+        let mut report = base_report();
+        let sec = report.security.data.as_mut().unwrap();
+        sec.ssid = None;
+        sec.encryption = WifiEncryption::Unknown;
+        sec.channel = None;
+        sec.frequency_mhz = None;
+        sec.signal_percent = None;
+        let output = render_report(&report, false);
+        assert!(!output.contains("SSID:"));
+        assert!(!output.contains("Channel:"));
+        assert!(!output.contains("no SSID"));
     }
 
     #[test]

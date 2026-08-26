@@ -226,7 +226,7 @@ pub struct PingSummary {
 
 static PING_TIME_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"time=([\d.]+) ms").unwrap());
 static PING_SUMMARY_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(\d+) packets transmitted, (\d+) received").unwrap());
+    LazyLock::new(|| Regex::new(r"(\d+) packets transmitted, (\d+) (?:packets )?received").unwrap());
 
 pub fn parse_ping_output(raw: &str) -> PingSummary {
     let rtts: Vec<f64> = PING_TIME_RE
@@ -495,6 +495,15 @@ mod tests {
         assert_eq!(result.transmitted, 10);
         assert_eq!(result.received, 0);
         assert!(result.rtts.is_empty());
+    }
+
+    #[test]
+    fn parses_macos_ping_format_packets_received() {
+        let raw = "PING 1.1.1.1 (1.1.1.1): 56 data bytes\n64 bytes from 1.1.1.1: icmp_seq=0 ttl=58 time=12.3 ms\n64 bytes from 1.1.1.1: icmp_seq=1 ttl=58 time=11.8 ms\n\n--- 1.1.1.1 ping statistics ---\n2 packets transmitted, 2 packets received, 0.0% packet loss\nround-trip min/avg/max/stddev = 11.8/12.0/12.3/0.2 ms";
+        let result = parse_ping_output(raw);
+        assert_eq!(result.transmitted, 2);
+        assert_eq!(result.received, 2);
+        assert_eq!(result.rtts, vec![12.3, 11.8]);
     }
 
     // --- parse_resolvectl_status ---
