@@ -248,6 +248,26 @@ pub struct ReliabilityData {
 
 // --- Topology ---
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InterfaceKind {
+    WiFi,
+    Ethernet,
+    Vpn,
+    Other,
+}
+
+impl InterfaceKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            InterfaceKind::WiFi => "WiFi",
+            InterfaceKind::Ethernet => "Ethernet",
+            InterfaceKind::Vpn => "VPN",
+            InterfaceKind::Other => "Other",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArpNeighbor {
@@ -263,6 +283,7 @@ pub struct ArpNeighbor {
 #[serde(rename_all = "camelCase")]
 pub struct TopologyData {
     pub interface: String,
+    pub interface_kind: InterfaceKind,
     pub ip_cidr: String,
     pub gateway: String,
     pub neighbors: Vec<ArpNeighbor>,

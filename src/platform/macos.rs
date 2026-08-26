@@ -1,10 +1,10 @@
 //! macOS implementation of PlatformProbe.
 //! Commands: route, ifconfig, arp, airport, scutil.
 
-use super::{AddrInfo, PlatformProbe, RouteInfo, WifiInfo};
+use super::{is_vpn_iface, AddrInfo, PlatformProbe, RouteInfo, WifiInfo};
 use crate::exec::{cmd, exec_cmd, ExecResult};
 use crate::network::lookup_mac_vendor;
-use crate::types::{ArpNeighbor, DnsResolverInfo, DnsSource, WifiEncryption};
+use crate::types::{ArpNeighbor, DnsResolverInfo, DnsSource, InterfaceKind, WifiEncryption};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -161,6 +161,28 @@ pub fn parse_scutil_dns(raw: &str, iface: &str) -> Option<DnsResolverInfo> {
     flush(&mut block_servers, &mut block_iface)
 }
 
+/// Parses `networksetup -listallhardwareports` to check if an interface is Wi-Fi.
+/// Each block (separated by blank lines) has "Hardware Port: X" then "Device: Y".
+pub fn is_wifi_hardware_port(raw: &str, iface: &str) -> bool {
+    let mut current_is_wifi = false;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            current_is_wifi = false;
+            continue;
+        }
+        if let Some(port) = trimmed.strip_prefix("Hardware Port:") {
+            let lower = port.trim().to_lowercase();
+            current_is_wifi = lower.contains("wi-fi") || lower.contains("airport") || lower.contains("wireless");
+        } else if let Some(dev) = trimmed.strip_prefix("Device:") {
+            if dev.trim() == iface && current_is_wifi {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 // ---------------------------------------------------------------------------
 // Probe
 // ---------------------------------------------------------------------------
@@ -197,6 +219,18 @@ impl PlatformProbe for MacProbe {
     /// TODO: fall back to `dig +short TXT whoami.cloudflare.com` or a curl DoH call.
     async fn system_egress_ip(&self) -> Option<String> {
         None
+    }
+
+    async fn interface_type(&self, iface: &str) -> InterfaceKind {
+        if is_vpn_iface(iface) {
+            return InterfaceKind::Vpn;
+        }
+        if let Ok(r) = exec_cmd(cmd(&["networksetup", "-listallhardwareports"])).await {
+            if is_wifi_hardware_port(&r.stdout, iface) {
+                return InterfaceKind::WiFi;
+            }
+        }
+        InterfaceKind::Ethernet
     }
 }
 

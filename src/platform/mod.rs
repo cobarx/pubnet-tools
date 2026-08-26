@@ -2,12 +2,27 @@
 //! native commands into common types. Checks call probe methods — they
 //! never invoke platform-specific binaries directly.
 
-use crate::types::{ArpNeighbor, DnsResolverInfo, WifiEncryption};
+use crate::types::{ArpNeighbor, DnsResolverInfo, InterfaceKind, WifiEncryption};
 
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
+
+/// True when the interface name identifies a software-defined tunnel (VPN).
+/// utun* = macOS Network Extension tunnels (Tailscale, OpenVPN, WireGuard, built-in macOS VPN)
+/// tun*/tap* = Linux userspace tunnel interfaces
+/// wg* = WireGuard kernel interfaces on Linux
+/// tailscale* = Tailscale on Linux (uses tailscale0, not tun*)
+/// ppp* = PPP-based VPNs
+pub fn is_vpn_iface(iface: &str) -> bool {
+    iface.starts_with("utun")
+        || iface.starts_with("tun")
+        || iface.starts_with("tap")
+        || iface.starts_with("wg")
+        || iface.starts_with("tailscale")
+        || iface.starts_with("ppp")
+}
 
 #[derive(Debug, Clone)]
 pub struct RouteInfo {
@@ -51,4 +66,7 @@ pub trait PlatformProbe {
     /// Returns None on platforms where this isn't directly obtainable.
     /// TODO: add dig/curl fallback for macOS.
     async fn system_egress_ip(&self) -> Option<String>;
+
+    /// Whether the interface is WiFi, Ethernet, or something else.
+    async fn interface_type(&self, iface: &str) -> InterfaceKind;
 }

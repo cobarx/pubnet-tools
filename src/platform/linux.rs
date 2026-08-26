@@ -1,13 +1,13 @@
 //! Linux implementation of PlatformProbe.
 //! Commands: ip, nmcli, resolvectl.
 
-use super::{AddrInfo, PlatformProbe, RouteInfo, WifiInfo};
+use super::{is_vpn_iface, AddrInfo, PlatformProbe, RouteInfo, WifiInfo};
 use crate::exec::{cmd, exec_cmd, ExecResult};
 use crate::network::{
     extract_remote_ip, parse_ip_addr, parse_ip_neigh, parse_ip_route, parse_nmcli_wifi,
     parse_resolvectl_status,
 };
-use crate::types::{ArpNeighbor, DnsResolverInfo};
+use crate::types::{ArpNeighbor, DnsResolverInfo, InterfaceKind};
 
 fn empty() -> ExecResult {
     ExecResult { stdout: String::new(), stderr: String::new(), exit_code: None }
@@ -59,5 +59,17 @@ impl PlatformProbe for LinuxProbe {
             .await
             .ok()?;
         extract_remote_ip(&r.stdout)
+    }
+
+    async fn interface_type(&self, iface: &str) -> InterfaceKind {
+        if is_vpn_iface(iface) {
+            return InterfaceKind::Vpn;
+        }
+        // /sys/class/net/<iface>/wireless exists only for WiFi interfaces
+        let wifi_path = format!("/sys/class/net/{iface}/wireless");
+        if tokio::fs::try_exists(&wifi_path).await.unwrap_or(false) {
+            return InterfaceKind::WiFi;
+        }
+        InterfaceKind::Ethernet
     }
 }

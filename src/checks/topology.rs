@@ -23,9 +23,10 @@ pub async fn check_topology<P: PlatformProbe>(probe: &P) -> CheckResult<Topology
         };
     };
 
-    let (addr, neighbors) = tokio::join!(
+    let (addr, neighbors, kind) = tokio::join!(
         probe.interface_addr(&route.device),
         probe.arp_neighbors(&route.device, Some(&route.gateway)),
+        probe.interface_type(&route.device),
     );
 
     let mut errors = Vec::new();
@@ -37,6 +38,7 @@ pub async fn check_topology<P: PlatformProbe>(probe: &P) -> CheckResult<Topology
 
     let data = TopologyData {
         interface: route.device,
+        interface_kind: kind,
         ip_cidr,
         gateway: route.gateway,
         neighbors,
@@ -57,7 +59,7 @@ pub async fn check_topology<P: PlatformProbe>(probe: &P) -> CheckResult<Topology
 mod tests {
     use super::*;
     use crate::platform::{AddrInfo, RouteInfo, WifiInfo, PlatformProbe};
-    use crate::types::{ArpNeighbor, DnsResolverInfo};
+    use crate::types::{ArpNeighbor, DnsResolverInfo, InterfaceKind};
 
     struct MockProbe {
         route: Option<RouteInfo>,
@@ -72,6 +74,7 @@ mod tests {
         async fn wifi_info(&self) -> Option<WifiInfo> { None }
         async fn dns_info(&self, _: &str) -> Option<DnsResolverInfo> { None }
         async fn system_egress_ip(&self) -> Option<String> { None }
+        async fn interface_type(&self, _: &str) -> InterfaceKind { InterfaceKind::Ethernet }
     }
 
     fn gateway_neighbor() -> ArpNeighbor {

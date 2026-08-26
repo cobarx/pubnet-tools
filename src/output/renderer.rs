@@ -74,7 +74,7 @@ fn render_network_section(report: &Report) -> Vec<String> {
     if let Some(topo) = topo {
         let gateway_vendor = topo.neighbors.iter().find(|n| n.is_gateway).and_then(|n| n.vendor.clone());
         let vendor_suffix = gateway_vendor.map(|v| format!(" ({v})")).unwrap_or_default();
-        lines.push(format!("  Interface: {} ({})", style(&topo.interface).bold(), topo.ip_cidr));
+        lines.push(format!("  Interface: {} · {} ({})", style(&topo.interface).bold(), topo.interface_kind.as_str(), topo.ip_cidr));
         lines.push(format!("  Gateway: {}{}", topo.gateway, vendor_suffix));
     } else {
         lines.push(format!("  Topology: {}", report.topology.status.as_str()));
@@ -244,6 +244,7 @@ mod tests {
                 status: CheckStatus::Ok,
                 data: Some(TopologyData {
                     interface: "wlan0".to_string(),
+                    interface_kind: InterfaceKind::WiFi,
                     ip_cidr: "192.168.5.151/24".to_string(),
                     gateway: "192.168.5.1".to_string(),
                     neighbors: vec![ArpNeighbor {
