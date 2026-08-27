@@ -1,24 +1,44 @@
 //! spec: reliability-check-resilience
 
-use crate::exec::{cmd, ExecResult};
-use crate::network::{parse_ping_output, stddev};
-use crate::types::{CheckResult, CheckStatus, Finding, PingTargetLabel, PingTargetResult, ReliabilityData, Severity};
+use crate::network::{stddev, PingSummary};
+use crate::types::{
+    CheckResult, CheckStatus, Finding, PingTargetLabel, PingTargetResult, ReliabilityData, Severity,
+};
 use std::future::Future;
 use std::time::Instant;
 
 const EXTERNAL_TARGETS: &[(&str, PingTargetLabel)] =
     &[("8.8.8.8", PingTargetLabel::GoogleDns), ("1.1.1.1", PingTargetLabel::CloudflareDns)];
 
-async fn ping_target<F, Fut>(exec: &F, host: &str, label: PingTargetLabel) -> PingTargetResult
+const PING_COUNT: u32 = 10;
+
+/// The production ping. Windows sends ICMP echoes directly via `IcmpSendEcho2`
+/// — no `ping.exe` (whose output localizes) and no ~1s inter-echo floor, so
+/// the check takes ~2s there instead of ~10s. Every other platform shells out
+/// to `ping -c 10 -i 0.2`. See
+/// docs/decisions/2026-08-28-windows-probes-via-win32-api.md.
+pub async fn system_ping(host: String) -> PingSummary {
+    #[cfg(windows)]
+    {
+        crate::platform::windows::icmp_ping(&host, PING_COUNT).await
+    }
+    #[cfg(not(windows))]
+    {
+        use crate::exec::{cmd, exec_cmd};
+        let count = PING_COUNT.to_string();
+        match exec_cmd(cmd(&["ping", "-c", &count, "-i", "0.2", &host])).await {
+            Ok(r) => crate::network::parse_ping_output(&r.stdout),
+            Err(_) => PingSummary { transmitted: 0, received: 0, rtts: Vec::new() },
+        }
+    }
+}
+
+async fn ping_target<P, Fut>(ping: &P, host: &str, label: PingTargetLabel) -> PingTargetResult
 where
-    F: Fn(Vec<String>) -> Fut,
-    Fut: Future<Output = std::io::Result<ExecResult>>,
+    P: Fn(String) -> Fut,
+    Fut: Future<Output = PingSummary>,
 {
-    let stdout = match exec(cmd(&["ping", "-c", "10", "-i", "0.2", host])).await {
-        Ok(r) => r.stdout,
-        Err(_) => String::new(),
-    };
-    let summary = parse_ping_output(&stdout);
+    let summary = ping(host.to_string()).await;
 
     let packet_loss_pct = if summary.transmitted > 0 {
         (summary.transmitted - summary.received) as f64 / summary.transmitted as f64 * 100.0
@@ -116,19 +136,19 @@ fn findings_for(targets: &[PingTargetResult]) -> Vec<Finding> {
 /// One target's failure never aborts the others - every target is pinged
 /// independently and its result reported regardless of the others' outcome.
 ///
-/// `exclude` drops specific external targets (e.g. `--exclude-target`)
-/// from the ping set entirely - the gateway is never excludable this way.
-/// Validating "don't exclude every external target" is the CLI layer's
-/// job (cli.rs), not this function's - this trusts its input the same way
-/// the rest of the check trusts a well-formed `gateway_ip`.
-pub async fn check_reliability<F, Fut>(
+/// `ping` pings one host `PING_COUNT` times and returns a `PingSummary`; the
+/// production impl is [`system_ping`]. `exclude` drops specific external
+/// targets (e.g. `--exclude-target`) entirely - the gateway is never
+/// excludable this way. Validating "don't exclude every external target" is
+/// the CLI layer's job (cli.rs), not this function's.
+pub async fn check_reliability<P, Fut>(
     gateway_ip: Option<&str>,
-    exec: &F,
+    ping: &P,
     exclude: &[PingTargetLabel],
 ) -> CheckResult<ReliabilityData>
 where
-    F: Fn(Vec<String>) -> Fut,
-    Fut: Future<Output = std::io::Result<ExecResult>>,
+    P: Fn(String) -> Fut,
+    Fut: Future<Output = PingSummary>,
 {
     let start = Instant::now();
 
@@ -143,9 +163,9 @@ where
         };
     };
 
-    let mut futures = vec![ping_target(exec, gateway_ip, PingTargetLabel::Gateway)];
+    let mut futures = vec![ping_target(ping, gateway_ip, PingTargetLabel::Gateway)];
     for (host, label) in EXTERNAL_TARGETS.iter().filter(|(_, l)| !exclude.contains(l)) {
-        futures.push(ping_target(exec, host, *label));
+        futures.push(ping_target(ping, host, *label));
     }
     let targets = futures_util::future::join_all(futures).await;
 
@@ -171,39 +191,30 @@ where
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
 
-    fn exec_result(stdout: &str) -> ExecResult {
-        ExecResult { stdout: stdout.to_string(), stderr: String::new(), exit_code: Some(0) }
+    fn summary(transmitted: u32, received: u32, rtts: &[f64]) -> PingSummary {
+        PingSummary { transmitted, received, rtts: rtts.to_vec() }
     }
 
-    fn ping_output(transmitted: u32, received: u32, rtts: &[f64]) -> String {
-        let mut lines: Vec<String> = rtts
-            .iter()
-            .enumerate()
-            .map(|(i, t)| format!("64 bytes from x: icmp_seq={} time={t} ms", i + 1))
-            .collect();
-        lines.push(format!("{transmitted} packets transmitted, {received} received, 0% packet loss"));
-        lines.join("\n")
+    fn reachable() -> PingSummary {
+        summary(10, 10, &[10.0, 12.0, 11.0, 9.0, 10.0, 11.0, 10.0, 12.0, 9.0, 11.0])
     }
 
-    fn reachable_output() -> String {
-        ping_output(10, 10, &[10.0, 12.0, 11.0, 9.0, 10.0, 11.0, 10.0, 12.0, 9.0, 11.0])
-    }
-
-    fn unreachable_output() -> String {
-        ping_output(10, 0, &[])
+    fn unreachable() -> PingSummary {
+        summary(10, 0, &[])
     }
 
     // spec: reliability-check-resilience#S4
     #[tokio::test]
     async fn no_gateway_ip_means_no_pings_attempted() {
         let call_count = AtomicUsize::new(0);
-        let exec = |_: Vec<String>| {
+        let ping = |_host: String| {
             call_count.fetch_add(1, Ordering::SeqCst);
-            async { Ok(exec_result("")) }
+            async { reachable() }
         };
 
-        let result = check_reliability(None, &exec, &[]).await;
+        let result = check_reliability(None, &ping, &[]).await;
 
         assert_eq!(result.status, CheckStatus::Skipped);
         assert!(result.data.is_none());
@@ -213,9 +224,9 @@ mod tests {
     // spec: reliability-check-resilience#S1
     #[tokio::test]
     async fn all_three_reachable_is_ok() {
-        let exec = |_: Vec<String>| async { Ok(exec_result(&reachable_output())) };
+        let ping = |_host: String| async { reachable() };
 
-        let result = check_reliability(Some("192.168.5.1"), &exec, &[]).await;
+        let result = check_reliability(Some("192.168.5.1"), &ping, &[]).await;
 
         assert_eq!(result.status, CheckStatus::Ok);
         let data = result.data.unwrap();
@@ -232,16 +243,11 @@ mod tests {
     // spec: reliability-check-resilience#S2
     #[tokio::test]
     async fn gateway_down_internet_up_is_degraded_not_aborted() {
-        let exec = |c: Vec<String>| async move {
-            let host = c.last().unwrap().clone();
-            if host == "192.168.5.1" {
-                Ok(exec_result(&unreachable_output()))
-            } else {
-                Ok(exec_result(&reachable_output()))
-            }
+        let ping = |host: String| async move {
+            if host == "192.168.5.1" { unreachable() } else { reachable() }
         };
 
-        let result = check_reliability(Some("192.168.5.1"), &exec, &[]).await;
+        let result = check_reliability(Some("192.168.5.1"), &ping, &[]).await;
 
         assert_eq!(result.status, CheckStatus::Degraded);
         let data = result.data.unwrap();
@@ -256,9 +262,9 @@ mod tests {
     // spec: reliability-check-resilience#S3
     #[tokio::test]
     async fn no_target_reachable_is_degraded_not_failed() {
-        let exec = |_: Vec<String>| async { Ok(exec_result(&unreachable_output())) };
+        let ping = |_host: String| async { unreachable() };
 
-        let result = check_reliability(Some("192.168.5.1"), &exec, &[]).await;
+        let result = check_reliability(Some("192.168.5.1"), &ping, &[]).await;
 
         assert_eq!(result.status, CheckStatus::Degraded);
         let data = result.data.unwrap();
@@ -273,13 +279,13 @@ mod tests {
 
     #[tokio::test]
     async fn excluded_external_target_is_not_pinged_at_all() {
-        let calls: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-        let exec = |c: Vec<String>| {
-            calls.lock().unwrap().push(c.last().unwrap().clone());
-            async { Ok(exec_result(&reachable_output())) }
+        let calls: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let ping = |host: String| {
+            calls.lock().unwrap().push(host.clone());
+            async { reachable() }
         };
 
-        let result = check_reliability(Some("192.168.5.1"), &exec, &[PingTargetLabel::GoogleDns]).await;
+        let result = check_reliability(Some("192.168.5.1"), &ping, &[PingTargetLabel::GoogleDns]).await;
 
         let data = result.data.unwrap();
         assert_eq!(data.targets.len(), 2);
@@ -290,16 +296,12 @@ mod tests {
 
     #[tokio::test]
     async fn internet_reachable_reflects_only_the_remaining_external_target() {
-        let exec = |c: Vec<String>| {
-            let host = c.last().unwrap().clone();
-            async move {
-                let output = if host == "1.1.1.1" { unreachable_output() } else { reachable_output() };
-                Ok(exec_result(&output))
-            }
+        let ping = |host: String| async move {
+            if host == "1.1.1.1" { unreachable() } else { reachable() }
         };
 
         let result =
-            check_reliability(Some("192.168.5.1"), &exec, &[PingTargetLabel::CloudflareDns]).await;
+            check_reliability(Some("192.168.5.1"), &ping, &[PingTargetLabel::CloudflareDns]).await;
 
         let data = result.data.unwrap();
         assert_eq!(data.targets.len(), 2);

@@ -1,0 +1,7 @@
+# capture.sh runs on Linux/macOS too — a CRLF shebang breaks it, so keep it
+# LF regardless of core.autocrlf.
+*.sh text eol=lf
+
+# Captured fixtures are raw external-command output and must be preserved
+# byte-for-byte (whitespace, trailing newlines, and any CRLF a platform emits).
+tests/fixtures/** -text

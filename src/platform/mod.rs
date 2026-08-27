@@ -8,6 +8,8 @@ use crate::types::{ArpNeighbor, DnsResolverInfo, InterfaceKind, WifiEncryption};
 pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 /// True when the interface name identifies a software-defined tunnel (VPN).
 /// utun* = macOS Network Extension tunnels (Tailscale, OpenVPN, WireGuard, built-in macOS VPN)

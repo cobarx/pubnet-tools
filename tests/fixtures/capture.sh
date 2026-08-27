@@ -55,6 +55,10 @@ elif [[ "$OS" == "Linux" ]]; then
     run "resolvectl_status"                     resolvectl status
     run "nmcli_dev_wifi_list"                   nmcli -t -f active,ssid,security,chan,freq,signal dev wifi list
 
+# No Windows branch: the Windows probes call the Win32 API directly (IP Helper
+# / WLAN / ICMP) and parse no command output, so there is nothing to capture.
+# See docs/decisions/2026-08-28-windows-probes-via-win32-api.md.
+
 else
     echo "Warning: unsupported OS $OS — no commands captured"
 fi

@@ -10,6 +10,8 @@ use pubnet_tools::types::{CaptivePortalMethod, CheckStatus, DnsLeakVerdict};
 use pubnet_tools::platform::linux::LinuxProbe;
 #[cfg(target_os = "macos")]
 use pubnet_tools::platform::macos::MacProbe;
+#[cfg(target_os = "windows")]
+use pubnet_tools::platform::windows::WindowsProbe;
 
 #[tokio::test]
 async fn produces_full_security_data_from_real_probes() {
@@ -17,6 +19,8 @@ async fn produces_full_security_data_from_real_probes() {
     let probe = LinuxProbe;
     #[cfg(target_os = "macos")]
     let probe = MacProbe;
+    #[cfg(target_os = "windows")]
+    let probe = WindowsProbe;
 
     let topology = check_topology(&probe).await;
     let iface = topology.data.map(|d| d.interface);

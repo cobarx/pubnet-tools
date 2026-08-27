@@ -224,10 +224,17 @@ pub struct PingSummary {
     pub rtts: Vec<f64>,
 }
 
+/// Parses `ping -c N` output on Linux and macOS. Windows does not use this —
+/// `checks::reliability::system_ping` sends ICMP echoes via `IcmpSendEcho2`
+/// there and builds the `PingSummary` directly (see
+/// docs/decisions/2026-08-28-windows-probes-via-win32-api.md).
+#[cfg(not(windows))]
 static PING_TIME_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"time=([\d.]+) ms").unwrap());
+#[cfg(not(windows))]
 static PING_SUMMARY_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d+) packets transmitted, (\d+) (?:packets )?received").unwrap());
 
+#[cfg(not(windows))]
 pub fn parse_ping_output(raw: &str) -> PingSummary {
     let rtts: Vec<f64> = PING_TIME_RE
         .captures_iter(raw)
@@ -294,6 +301,23 @@ pub fn is_valid_ipv4(s: &str) -> bool {
         Some(caps) => (1..=4).all(|i| caps[i].parse::<u32>().is_ok_and(|n| n <= 255)),
         None => false,
     }
+}
+
+/// True when `ip` falls inside the network `cidr` describes — e.g.
+/// `"192.168.1.5"` in `"192.168.1.0/24"`. `None` if either side doesn't parse
+/// as IPv4 / `a.b.c.d/n`. Used by the topology contract test to check the
+/// gateway is on the interface's own subnet (a real L2 invariant, and a cheap
+/// cross-field check on the platform probe).
+pub fn ipv4_in_cidr(ip: &str, cidr: &str) -> Option<bool> {
+    let ip: std::net::Ipv4Addr = ip.parse().ok()?;
+    let (network, prefix) = cidr.split_once('/')?;
+    let network: std::net::Ipv4Addr = network.parse().ok()?;
+    let prefix: u32 = prefix.trim().parse().ok()?;
+    if prefix > 32 {
+        return None;
+    }
+    let mask = if prefix == 0 { 0 } else { u32::MAX << (32 - prefix) };
+    Some(u32::from(ip) & mask == u32::from(network) & mask)
 }
 
 /// Extracts a `remote_ip` value from raw response text — tolerant of
@@ -477,8 +501,9 @@ mod tests {
         assert!(parse_ip_neigh("", "wlan0", Some("192.168.5.1")).is_empty());
     }
 
-    // --- parse_ping_output ---
+    // --- parse_ping_output (Linux/macOS only; Windows uses IcmpSendEcho2) ---
 
+    #[cfg(not(windows))]
     #[test]
     fn parses_per_packet_rtts_and_summary() {
         let raw = "PING 1.1.1.1 (1.1.1.1) 56(84) bytes of data.\n64 bytes from 1.1.1.1: icmp_seq=1 ttl=56 time=15.4 ms\n64 bytes from 1.1.1.1: icmp_seq=2 ttl=56 time=9.69 ms\n64 bytes from 1.1.1.1: icmp_seq=3 ttl=56 time=20.9 ms\n\n--- 1.1.1.1 ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss, time 401ms\nrtt min/avg/max/mdev = 9.685/15.348/20.918/4.586 ms";
@@ -488,6 +513,7 @@ mod tests {
         assert_eq!(result.rtts, vec![15.4, 9.69, 20.9]);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn hundred_percent_loss_reports_zero_received_no_rtts() {
         let raw = "PING 10.0.0.99 (10.0.0.99) 56(84) bytes of data.\n\n--- 10.0.0.99 ping statistics ---\n10 packets transmitted, 0 received, 100% packet loss, time 2049ms";
@@ -497,6 +523,7 @@ mod tests {
         assert!(result.rtts.is_empty());
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn parses_macos_ping_format_packets_received() {
         let raw = "PING 1.1.1.1 (1.1.1.1): 56 data bytes\n64 bytes from 1.1.1.1: icmp_seq=0 ttl=58 time=12.3 ms\n64 bytes from 1.1.1.1: icmp_seq=1 ttl=58 time=11.8 ms\n\n--- 1.1.1.1 ping statistics ---\n2 packets transmitted, 2 packets received, 0.0% packet loss\nround-trip min/avg/max/stddev = 11.8/12.0/12.3/0.2 ms";
@@ -564,6 +591,26 @@ mod tests {
         assert_eq!(ip_family("192.168.5.151"), IpFamily::V4);
         assert_eq!(ip_family("2607:f8b0:4004:1001::12e"), IpFamily::V6);
         assert_eq!(ip_family("::1"), IpFamily::V6);
+    }
+
+    // --- ipv4_in_cidr ---
+
+    #[test]
+    fn ipv4_in_cidr_matches_within_and_rejects_outside() {
+        assert_eq!(ipv4_in_cidr("192.168.1.5", "192.168.1.0/24"), Some(true));
+        assert_eq!(ipv4_in_cidr("192.168.1.1", "192.168.1.247/24"), Some(true)); // cidr host bits ignored
+        assert_eq!(ipv4_in_cidr("192.168.2.5", "192.168.1.0/24"), Some(false));
+        assert_eq!(ipv4_in_cidr("10.0.0.9", "10.0.0.8/30"), Some(true));
+        assert_eq!(ipv4_in_cidr("10.0.0.12", "10.0.0.8/30"), Some(false));
+        assert_eq!(ipv4_in_cidr("8.8.8.8", "0.0.0.0/0"), Some(true)); // default route
+    }
+
+    #[test]
+    fn ipv4_in_cidr_none_on_bad_input() {
+        assert_eq!(ipv4_in_cidr("nope", "192.168.1.0/24"), None);
+        assert_eq!(ipv4_in_cidr("192.168.1.5", "192.168.1.0"), None); // no prefix
+        assert_eq!(ipv4_in_cidr("192.168.1.5", "192.168.1.0/33"), None);
+        assert_eq!(ipv4_in_cidr("::1", "192.168.1.0/24"), None); // v6
     }
 
     // --- extract_remote_ip ---

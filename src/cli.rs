@@ -1,7 +1,8 @@
-use crate::checks::reliability::check_reliability;
+use crate::checks::reliability::{check_reliability, system_ping};
 use crate::checks::security::check_security;
 use crate::checks::speed::{check_speed, default_locate, DEFAULT_TEST_DURATION};
 use crate::checks::topology::check_topology;
+#[cfg(not(windows))]
 use crate::exec::{cmd, exec_cmd};
 use crate::output::renderer::render_report;
 use crate::output::reporter::{default_reports_dir, save_html_report, save_report};
@@ -238,6 +239,8 @@ pub async fn run_audit(options: RunAuditOptions) -> Report {
     let probe = crate::platform::linux::LinuxProbe;
     #[cfg(target_os = "macos")]
     let probe = crate::platform::macos::MacProbe;
+    #[cfg(target_os = "windows")]
+    let probe = crate::platform::windows::WindowsProbe;
 
     let should_run = |name: CheckName| options.only.as_ref().is_none_or(|only| only.contains(&name));
     let will_run_topology = should_run(CheckName::Topology);
@@ -285,7 +288,7 @@ pub async fn run_audit(options: RunAuditOptions) -> Report {
         },
         async {
             if should_run(CheckName::Reliability) {
-                check_reliability(gateway_ip.as_deref(), &exec_cmd, &options.exclude_targets).await
+                check_reliability(gateway_ip.as_deref(), &system_ping, &options.exclude_targets).await
             } else {
                 excluded_result("reliability")
             }
@@ -413,21 +416,33 @@ async fn run_command(cli: &Cli) -> i32 {
 }
 
 /// Hand the report file to the desktop's default handler — `xdg-open` on
-/// Linux, `open` on macOS. Both fork the real application and return quickly,
-/// so this never blocks on the browser staying open. exec_cmd never rejects
-/// on a non-zero exit; only a missing opener binary (ENOENT) surfaces, which
-/// we report without failing the run — the file is already written and its
-/// path was printed.
+/// Linux, `open` on macOS, `explorer` on Windows. All three fork the real
+/// application and return quickly, so this never blocks on the browser
+/// staying open. Uses `tokio::process::Command` directly rather than the
+/// `exec` wrapper, since that wrapper isn't in scope on Windows (where the
+/// checks don't shell out). Failure to launch is reported without failing the
+/// run — the file is already written and its path was printed.
 async fn open_in_browser(path: &std::path::Path) {
-    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    let path_str = path.to_string_lossy().into_owned();
-    match exec_cmd(cmd(&[opener, path_str.as_str()])).await {
-        Ok(result) if result.exit_code == Some(0) => {}
-        Ok(result) => eprintln!("Could not open the report ({opener} exited {:?}). Open it yourself: {}", result.exit_code, path.display()),
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(target_os = "windows")]
+    let opener = "explorer";
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let opener = "xdg-open";
+
+    match tokio::process::Command::new(opener).arg(path).status().await {
+        // explorer.exe returns exit code 1 even on success, so on Windows a
+        // launched process is treated as good enough; elsewhere a non-zero
+        // exit is a real failure worth surfacing.
+        Ok(status) if status.success() || cfg!(windows) => {}
+        Ok(status) => {
+            eprintln!("Could not open the report ({opener} exited {status}). Open it yourself: {}", path.display())
+        }
         Err(_) => eprintln!("Could not find '{opener}' to open the report. Open it yourself: {}", path.display()),
     }
 }
 
+#[cfg(not(windows))]
 async fn detect_asciinema_version() -> Option<u32> {
     let which = exec_cmd(cmd(&["which", "asciinema"])).await.ok()?;
     if which.exit_code != Some(0) {
@@ -444,6 +459,22 @@ async fn detect_asciinema_version() -> Option<u32> {
 }
 
 async fn record_command() -> i32 {
+    #[cfg(windows)]
+    {
+        eprintln!(
+            "`pubnetchk record` wraps the run in asciinema, which has no Windows build. \
+             Use Windows Terminal's own session recording, or run pubnetchk under WSL."
+        );
+        1
+    }
+    #[cfg(not(windows))]
+    {
+        record_command_unix().await
+    }
+}
+
+#[cfg(not(windows))]
+async fn record_command_unix() -> i32 {
     let Some(version) = detect_asciinema_version().await else {
         eprintln!("asciinema is not installed. Install it with: sudo pacman -S asciinema");
         return 1;

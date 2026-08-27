@@ -23,9 +23,14 @@ covers what that actually means and how to change it.
 
 ## Requirements
 
-- Linux
 - Rust (edition 2024 toolchain — `rustup` is the easiest way to get one)
-- `nmcli` (NetworkManager), `ip`, `ping`, `resolvectl`
+- **Linux:** `nmcli` (NetworkManager), `ip`, `ping`, `resolvectl`
+- **macOS:** `route`, `ifconfig`, `arp`, `scutil`, `networksetup`, `ping` (all built in)
+- **Windows 10+:** nothing extra at runtime — the probes call the Win32 API directly.
+  Build with the GNU toolchain (`rustup default stable-x86_64-pc-windows-gnu` +
+  `scoop install mingw` on `PATH`) — the MSVC toolchain needs the Visual Studio C++
+  build tools. `record` is not supported on Windows; DNS-interception detection is
+  limited (reports `uncertain`).
 
 ## Installation
 
