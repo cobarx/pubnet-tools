@@ -228,7 +228,37 @@ static PING_TIME_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"time=([\d.]
 static PING_SUMMARY_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d+) packets transmitted, (\d+) (?:packets )?received").unwrap());
 
+// Windows `ping` output is a different format entirely: per-reply lines read
+// `Reply from 1.1.1.1: bytes=32 time=3ms TTL=128` (or `time<1ms`, no space
+// before `ms`, integer only), and the summary reads
+// `Packets: Sent = 10, Received = 9, Lost = 1 (10% loss),`. The
+// "Approximate round trip times" block is omitted entirely on 100% loss.
+static WIN_PING_TIME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"time([<=])(\d+)ms").unwrap());
+static WIN_PING_SUMMARY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"Sent = (\d+), Received = (\d+)").unwrap());
+
+fn parse_windows_ping(raw: &str) -> PingSummary {
+    let rtts: Vec<f64> = WIN_PING_TIME_RE
+        .captures_iter(raw)
+        .map(|c| if &c[1] == "<" { 0.0 } else { c[2].parse().unwrap_or(0.0) })
+        .collect();
+
+    let (transmitted, received) = WIN_PING_SUMMARY_RE
+        .captures(raw)
+        .map(|c| (c[1].parse().unwrap_or(0), c[2].parse().unwrap_or(0)))
+        .unwrap_or((0, 0));
+
+    PingSummary { transmitted, received, rtts }
+}
+
 pub fn parse_ping_output(raw: &str) -> PingSummary {
+    // Windows `ping` — detected by its summary line, which neither the Linux
+    // nor the macOS format ever produces.
+    if raw.contains("Ping statistics for") || raw.contains("Packets: Sent =") {
+        return parse_windows_ping(raw);
+    }
+
     let rtts: Vec<f64> = PING_TIME_RE
         .captures_iter(raw)
         .filter_map(|c| c[1].parse().ok())
@@ -504,6 +534,46 @@ mod tests {
         assert_eq!(result.transmitted, 2);
         assert_eq!(result.received, 2);
         assert_eq!(result.rtts, vec![12.3, 11.8]);
+    }
+
+    // Real captures — tests/fixtures/ethernet-vmware-windows/ (Windows 11 `ping`).
+
+    #[test]
+    fn fixture_parses_windows_ping_all_replies() {
+        let raw = include_str!("../tests/fixtures/ethernet-vmware-windows/ping_-n_4_1.1.1.1.txt");
+        let result = parse_ping_output(raw);
+        assert_eq!(result.transmitted, 4);
+        assert_eq!(result.received, 4);
+        assert_eq!(result.rtts, vec![3.0, 3.0, 3.0, 3.0]);
+    }
+
+    #[test]
+    fn fixture_parses_windows_ping_total_timeout() {
+        let raw =
+            include_str!("../tests/fixtures/ethernet-vmware-windows/ping_-n_4_-w_1000_192.0.2.1.txt");
+        let result = parse_ping_output(raw);
+        assert_eq!(result.transmitted, 4);
+        assert_eq!(result.received, 0);
+        assert!(result.rtts.is_empty());
+    }
+
+    #[test]
+    fn windows_ping_sub_millisecond_replies_parse_as_zero() {
+        // `time<1ms` — the gateway on a local link. Capture verified this form
+        // exists; kept as a unit test since the committed fixture pings 1.1.1.1.
+        let raw = "Reply from 172.16.228.2: bytes=32 time<1ms TTL=128\nReply from 172.16.228.2: bytes=32 time<1ms TTL=128\n\nPing statistics for 172.16.228.2:\n    Packets: Sent = 2, Received = 2, Lost = 0 (0% loss),";
+        let result = parse_ping_output(raw);
+        assert_eq!(result.received, 2);
+        assert_eq!(result.rtts, vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn windows_ping_partial_loss() {
+        let raw = "Reply from 1.1.1.1: bytes=32 time=14ms TTL=57\nRequest timed out.\nReply from 1.1.1.1: bytes=32 time=16ms TTL=57\n\nPing statistics for 1.1.1.1:\n    Packets: Sent = 3, Received = 2, Lost = 1 (33% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 14ms, Maximum = 16ms, Average = 15ms";
+        let result = parse_ping_output(raw);
+        assert_eq!(result.transmitted, 3);
+        assert_eq!(result.received, 2);
+        assert_eq!(result.rtts, vec![14.0, 16.0]);
     }
 
     // --- parse_resolvectl_status ---

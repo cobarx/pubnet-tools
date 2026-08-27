@@ -5,9 +5,23 @@ use pubnet_tools::checks::reliability::check_reliability;
 use pubnet_tools::checks::topology::check_topology;
 use pubnet_tools::exec::exec_cmd;
 
+#[cfg(target_os = "linux")]
+use pubnet_tools::platform::linux::LinuxProbe;
+#[cfg(target_os = "macos")]
+use pubnet_tools::platform::macos::MacProbe;
+#[cfg(target_os = "windows")]
+use pubnet_tools::platform::windows::WindowsProbe;
+
 #[tokio::test]
 async fn pings_the_real_gateway_and_two_external_targets() {
-    let topology = check_topology(&exec_cmd).await;
+    #[cfg(target_os = "linux")]
+    let probe = LinuxProbe;
+    #[cfg(target_os = "macos")]
+    let probe = MacProbe;
+    #[cfg(target_os = "windows")]
+    let probe = WindowsProbe;
+
+    let topology = check_topology(&probe).await;
     let gateway_ip = topology.data.map(|d| d.gateway);
 
     let result = check_reliability(gateway_ip.as_deref(), &exec_cmd, &[]).await;

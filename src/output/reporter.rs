@@ -10,9 +10,16 @@ pub fn default_reports_dir() -> PathBuf {
 }
 
 fn dirs_home() -> PathBuf {
-    // No `dirs` crate dependency for one lookup - $HOME is guaranteed on
-    // every platform pubnetchk targets (see CLAUDE.md: Linux only).
-    std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."))
+    // No `dirs` crate dependency for one lookup. $HOME covers Linux/macOS
+    // (and Git Bash on Windows); %USERPROFILE% is the native-Windows home.
+    home_from(std::env::var("HOME").ok(), std::env::var("USERPROFILE").ok())
+}
+
+fn home_from(home: Option<String>, userprofile: Option<String>) -> PathBuf {
+    home.filter(|s| !s.is_empty())
+        .or(userprofile.filter(|s| !s.is_empty()))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 pub async fn save_report(report: &Report, reports_dir: &Path) -> std::io::Result<PathBuf> {
@@ -62,6 +69,20 @@ mod tests {
         assert_eq!(path, dir.path().join("2026-08-24T12-34-56.789Z.json"));
         let written = tokio::fs::read_to_string(&path).await.unwrap();
         assert!(written.contains("\"version\""));
+    }
+
+    #[test]
+    fn home_wins_over_userprofile_and_both_over_cwd() {
+        assert_eq!(
+            home_from(Some("/home/x".into()), Some("C:\\Users\\x".into())),
+            PathBuf::from("/home/x")
+        );
+        assert_eq!(
+            home_from(None, Some("C:\\Users\\x".into())),
+            PathBuf::from("C:\\Users\\x")
+        );
+        assert_eq!(home_from(Some(String::new()), None), PathBuf::from("."));
+        assert_eq!(home_from(None, None), PathBuf::from("."));
     }
 
     #[tokio::test]

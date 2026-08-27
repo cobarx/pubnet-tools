@@ -10,6 +10,8 @@ use pubnet_tools::types::CheckStatus;
 use pubnet_tools::platform::linux::LinuxProbe;
 #[cfg(target_os = "macos")]
 use pubnet_tools::platform::macos::MacProbe;
+#[cfg(target_os = "windows")]
+use pubnet_tools::platform::windows::WindowsProbe;
 
 #[tokio::test]
 async fn discovers_default_interface_gateway_and_arp_neighbors_passively() {
@@ -17,6 +19,8 @@ async fn discovers_default_interface_gateway_and_arp_neighbors_passively() {
     let probe = LinuxProbe;
     #[cfg(target_os = "macos")]
     let probe = MacProbe;
+    #[cfg(target_os = "windows")]
+    let probe = WindowsProbe;
 
     let result = check_topology(&probe).await;
 

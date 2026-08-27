@@ -2,7 +2,9 @@ use crate::checks::reliability::check_reliability;
 use crate::checks::security::check_security;
 use crate::checks::speed::{check_speed, default_locate, DEFAULT_TEST_DURATION};
 use crate::checks::topology::check_topology;
-use crate::exec::{cmd, exec_cmd};
+use crate::exec::exec_cmd;
+#[cfg(not(windows))]
+use crate::exec::cmd;
 use crate::output::renderer::render_report;
 use crate::output::reporter::{default_reports_dir, save_report};
 use crate::scoring::{calculate_score, ScorableResult};
@@ -231,6 +233,8 @@ pub async fn run_audit(options: RunAuditOptions) -> Report {
     let probe = crate::platform::linux::LinuxProbe;
     #[cfg(target_os = "macos")]
     let probe = crate::platform::macos::MacProbe;
+    #[cfg(target_os = "windows")]
+    let probe = crate::platform::windows::WindowsProbe;
 
     let should_run = |name: CheckName| options.only.as_ref().is_none_or(|only| only.contains(&name));
     let will_run_topology = should_run(CheckName::Topology);
@@ -389,6 +393,7 @@ async fn run_command(cli: &Cli) -> i32 {
     }
 }
 
+#[cfg(not(windows))]
 async fn detect_asciinema_version() -> Option<u32> {
     let which = exec_cmd(cmd(&["which", "asciinema"])).await.ok()?;
     if which.exit_code != Some(0) {
@@ -405,6 +410,22 @@ async fn detect_asciinema_version() -> Option<u32> {
 }
 
 async fn record_command() -> i32 {
+    #[cfg(windows)]
+    {
+        eprintln!(
+            "`pubnetchk record` wraps the run in asciinema, which has no Windows build. \
+             Use Windows Terminal's own session recording, or run pubnetchk under WSL."
+        );
+        1
+    }
+    #[cfg(not(windows))]
+    {
+        record_command_unix().await
+    }
+}
+
+#[cfg(not(windows))]
+async fn record_command_unix() -> i32 {
     let Some(version) = detect_asciinema_version().await else {
         eprintln!("asciinema is not installed. Install it with: sudo pacman -S asciinema");
         return 1;

@@ -9,12 +9,31 @@ use std::time::Instant;
 const EXTERNAL_TARGETS: &[(&str, PingTargetLabel)] =
     &[("8.8.8.8", PingTargetLabel::GoogleDns), ("1.1.1.1", PingTargetLabel::CloudflareDns)];
 
+const PING_COUNT: &str = "10";
+
+/// `ping` has no portable argument set. Linux/macOS take `-c <count>`;
+/// Linux additionally allows `-i 0.2` to compress 10 packets into ~2s
+/// (non-root floor is 200ms). Windows `ping` uses `-n <count>`, has no
+/// sub-second interval flag at all (it waits ~1s between echoes, so 10
+/// packets is ~10s), and `-i` there sets the TTL — passing `-i 0.2` would
+/// break it outright. `-w 2000` caps the per-reply wait. See
+/// docs/decisions/2026-08-27-windows-platform-support.md.
+#[cfg(windows)]
+fn ping_cmd(host: &str) -> Vec<String> {
+    cmd(&["ping", "-n", PING_COUNT, "-w", "2000", host])
+}
+
+#[cfg(not(windows))]
+fn ping_cmd(host: &str) -> Vec<String> {
+    cmd(&["ping", "-c", PING_COUNT, "-i", "0.2", host])
+}
+
 async fn ping_target<F, Fut>(exec: &F, host: &str, label: PingTargetLabel) -> PingTargetResult
 where
     F: Fn(Vec<String>) -> Fut,
     Fut: Future<Output = std::io::Result<ExecResult>>,
 {
-    let stdout = match exec(cmd(&["ping", "-c", "10", "-i", "0.2", host])).await {
+    let stdout = match exec(ping_cmd(host)).await {
         Ok(r) => r.stdout,
         Err(_) => String::new(),
     };
