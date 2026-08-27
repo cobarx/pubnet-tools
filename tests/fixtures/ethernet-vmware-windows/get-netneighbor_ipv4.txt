@@ -1,0 +1,54 @@
+
+
+IPAddress        : 255.255.255.255
+LinkLayerAddress : FF-FF-FF-FF-FF-FF
+State            : Permanent
+InterfaceAlias   : Ethernet0
+
+IPAddress        : 239.255.255.250
+LinkLayerAddress : 01-00-5E-7F-FF-FA
+State            : Permanent
+InterfaceAlias   : Ethernet0
+
+IPAddress        : 224.0.0.252
+LinkLayerAddress : 01-00-5E-00-00-FC
+State            : Permanent
+InterfaceAlias   : Ethernet0
+
+IPAddress        : 224.0.0.251
+LinkLayerAddress : 01-00-5E-00-00-FB
+State            : Permanent
+InterfaceAlias   : Ethernet0
+
+IPAddress        : 224.0.0.22
+LinkLayerAddress : 01-00-5E-00-00-16
+State            : Permanent
+InterfaceAlias   : Ethernet0
+
+IPAddress        : 172.16.228.255
+LinkLayerAddress : FF-FF-FF-FF-FF-FF
+State            : Permanent
+InterfaceAlias   : Ethernet0
+
+IPAddress        : 172.16.228.254
+LinkLayerAddress : 00-50-56-EA-D9-D9
+State            : Stale
+InterfaceAlias   : Ethernet0
+
+IPAddress        : 172.16.228.2
+LinkLayerAddress : 00-50-56-FE-6E-A0
+State            : Reachable
+InterfaceAlias   : Ethernet0
+
+IPAddress        : 239.255.255.250
+LinkLayerAddress : 
+State            : Permanent
+InterfaceAlias   : Loopback Pseudo-Interface 1
+
+IPAddress        : 224.0.0.22
+LinkLayerAddress : 
+State            : Permanent
+InterfaceAlias   : Loopback Pseudo-Interface 1
+
+
+

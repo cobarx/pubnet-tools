@@ -55,6 +55,28 @@ elif [[ "$OS" == "Linux" ]]; then
     run "resolvectl_status"                     resolvectl status
     run "nmcli_dev_wifi_list"                   nmcli -t -f active,ssid,security,chan,freq,signal dev wifi list
 
+elif [[ "$OS" == MINGW* || "$OS" == MSYS* || "$OS" == CYGWIN* ]]; then
+    echo "Capturing Windows fixtures..."
+
+    # Every probe on Windows goes through PowerShell's Get-Net* cmdlets. Their
+    # property names are English regardless of the Windows display language, so
+    # `Format-List` output is a stable "Key : Value" shape to parse — unlike
+    # `ipconfig`/`route print`, which localize. Raw (verbatim) output is saved:
+    # the leading/trailing blank lines Format-List emits are part of the data.
+    ps() { powershell -NoProfile -NonInteractive -Command "$1"; }
+
+    IFACE=$(ps "(Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Sort-Object RouteMetric | Select-Object -First 1).InterfaceAlias" 2>/dev/null | tr -d '\r' | head -1 || echo "unknown")
+
+    run "get-netroute_default"            ps "Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Select-Object NextHop,InterfaceAlias,InterfaceIndex,RouteMetric | Format-List"
+    run "get-netipaddress_ipv4"           ps "Get-NetIPAddress -AddressFamily IPv4 | Select-Object IPAddress,InterfaceAlias,PrefixLength | Format-List"
+    run "get-netneighbor_ipv4"            ps "Get-NetNeighbor -AddressFamily IPv4 | Select-Object IPAddress,LinkLayerAddress,State,InterfaceAlias | Format-List"
+    run "get-netadapter"                  ps "Get-NetAdapter | Select-Object Name,InterfaceDescription,PhysicalMediaType,Status,ifIndex | Format-List"
+    run "get-dnsclientserveraddress_ipv4" ps "Get-DnsClientServerAddress -AddressFamily IPv4 | Select-Object InterfaceAlias,InterfaceIndex,ServerAddresses | Format-List"
+    run "netsh_wlan_show_interfaces"      netsh wlan show interfaces
+    run "arp_-a"                          arp -a
+    run "ping_-n_4_1.1.1.1"              ping -n 4 1.1.1.1
+    run "ping_-n_4_-w_1000_192.0.2.1"    ping -n 4 -w 1000 192.0.2.1
+
 else
     echo "Warning: unsupported OS $OS — no commands captured"
 fi
@@ -63,10 +85,15 @@ fi
 echo ""
 read -r -p "Short notes for this capture (network type, what's notable): " NOTES
 
+OS_STRING="$(uname -s) $(uname -r)"
+if [[ "$OS" == MINGW* || "$OS" == MSYS* || "$OS" == CYGWIN* ]]; then
+    OS_STRING="$(powershell -NoProfile -NonInteractive -Command '(Get-CimInstance Win32_OperatingSystem).Caption + " " + [Environment]::OSVersion.Version' 2>/dev/null | tr -d '\r' | head -1)"
+fi
+
 cat > "$DIR/meta.toml" <<META
 context      = "$CONTEXT"
 captured_at  = "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-os           = "$(uname -s) $(uname -r)"
+os           = "$OS_STRING"
 interface    = "$IFACE"
 notes        = "$NOTES"
 META

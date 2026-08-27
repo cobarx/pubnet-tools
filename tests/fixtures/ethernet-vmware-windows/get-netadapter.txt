@@ -1,0 +1,10 @@
+
+
+Name                 : Ethernet0
+InterfaceDescription : Intel(R) 82574L Gigabit Network Connection
+PhysicalMediaType    : 802.3
+Status               : Up
+ifIndex              : 11
+
+
+
