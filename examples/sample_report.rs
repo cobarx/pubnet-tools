@@ -140,7 +140,11 @@ fn sample_report() -> Report {
             findings: empty_findings(),
             duration_ms: 20000,
         },
-        score: ScoreResult { total: 40, level: RiskLevel::High, findings: vec![wifi_open, dns_clean, no_portal] },
+        score: ScoreResult {
+            total: 40,
+            level: RiskLevel::High,
+            findings: vec![wifi_open, dns_clean, no_portal],
+        },
     }
 }
 

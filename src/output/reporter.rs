@@ -12,7 +12,10 @@ pub fn default_reports_dir() -> PathBuf {
 fn dirs_home() -> PathBuf {
     // No `dirs` crate dependency for one lookup. $HOME covers Linux/macOS
     // (and Git Bash on Windows); %USERPROFILE% is the native-Windows home.
-    home_from(std::env::var("HOME").ok(), std::env::var("USERPROFILE").ok())
+    home_from(
+        std::env::var("HOME").ok(),
+        std::env::var("USERPROFILE").ok(),
+    )
 }
 
 fn home_from(home: Option<String>, userprofile: Option<String>) -> PathBuf {
@@ -26,7 +29,8 @@ pub async fn save_report(report: &Report, reports_dir: &Path) -> std::io::Result
     tokio::fs::create_dir_all(reports_dir).await?;
     let filename = format!("{}.json", report.timestamp.replace(':', "-"));
     let path = reports_dir.join(filename);
-    let json = serde_json::to_string_pretty(report).expect("Report serialization should never fail");
+    let json =
+        serde_json::to_string_pretty(report).expect("Report serialization should never fail");
     tokio::fs::write(&path, json).await?;
     Ok(path)
 }
@@ -68,7 +72,11 @@ mod tests {
             speed: empty("speed"),
             reliability: empty("reliability"),
             topology: empty("topology"),
-            score: ScoreResult { total: 0, level: RiskLevel::Low, findings: vec![] },
+            score: ScoreResult {
+                total: 0,
+                level: RiskLevel::Low,
+                findings: vec![],
+            },
         }
     }
 

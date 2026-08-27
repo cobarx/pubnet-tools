@@ -53,7 +53,10 @@ mod tests {
     #[test]
     fn zero_point_findings_score_low() {
         let findings = vec![finding(0, "a")];
-        let score = calculate_score(&[ScorableResult { status: CheckStatus::Ok, findings: &findings }]);
+        let score = calculate_score(&[ScorableResult {
+            status: CheckStatus::Ok,
+            findings: &findings,
+        }]);
         assert_eq!(score.total, 0);
         assert_eq!(score.level, RiskLevel::Low);
     }
@@ -64,8 +67,14 @@ mod tests {
         let skipped_findings = vec![finding(40, "should-not-count")];
         let ok_findings = vec![finding(0, "b")];
         let score = calculate_score(&[
-            ScorableResult { status: CheckStatus::Skipped, findings: &skipped_findings },
-            ScorableResult { status: CheckStatus::Ok, findings: &ok_findings },
+            ScorableResult {
+                status: CheckStatus::Skipped,
+                findings: &skipped_findings,
+            },
+            ScorableResult {
+                status: CheckStatus::Ok,
+                findings: &ok_findings,
+            },
         ]);
         assert_eq!(score.total, 0);
         assert_eq!(score.level, RiskLevel::Low);
@@ -77,8 +86,14 @@ mod tests {
     fn nineteen_is_low_twenty_is_medium() {
         let f19 = vec![finding(19, "a")];
         let f20 = vec![finding(20, "a")];
-        let low = calculate_score(&[ScorableResult { status: CheckStatus::Ok, findings: &f19 }]);
-        let medium = calculate_score(&[ScorableResult { status: CheckStatus::Ok, findings: &f20 }]);
+        let low = calculate_score(&[ScorableResult {
+            status: CheckStatus::Ok,
+            findings: &f19,
+        }]);
+        let medium = calculate_score(&[ScorableResult {
+            status: CheckStatus::Ok,
+            findings: &f20,
+        }]);
         assert_eq!(low.level, RiskLevel::Low);
         assert_eq!(medium.level, RiskLevel::Medium);
     }
@@ -88,8 +103,14 @@ mod tests {
     fn forty_nine_is_medium_fifty_is_high() {
         let f49 = vec![finding(49, "a")];
         let f50 = vec![finding(50, "a")];
-        let medium = calculate_score(&[ScorableResult { status: CheckStatus::Ok, findings: &f49 }]);
-        let high = calculate_score(&[ScorableResult { status: CheckStatus::Ok, findings: &f50 }]);
+        let medium = calculate_score(&[ScorableResult {
+            status: CheckStatus::Ok,
+            findings: &f49,
+        }]);
+        let high = calculate_score(&[ScorableResult {
+            status: CheckStatus::Ok,
+            findings: &f50,
+        }]);
         assert_eq!(medium.level, RiskLevel::Medium);
         assert_eq!(high.level, RiskLevel::High);
     }

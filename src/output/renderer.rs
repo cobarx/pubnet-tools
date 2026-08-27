@@ -3,7 +3,7 @@
 //! callout.
 
 use crate::types::{DnsLeakVerdict, PingTargetLabel, ReliabilityData, Report, RiskLevel, Severity};
-use console::{style, Style};
+use console::{Style, style};
 
 fn level_style(level: RiskLevel) -> Style {
     match level {
@@ -31,22 +31,41 @@ pub struct ReliabilitySummary {
 /// jitter stay in the JSON report - this is deliberately less than that,
 /// not a different view of the same amount of information.
 pub fn summarize_reliability(rel: &ReliabilityData) -> ReliabilitySummary {
-    let gateway = rel.targets.iter().find(|t| t.label == PingTargetLabel::Gateway);
-    let external: Vec<_> = rel.targets.iter().filter(|t| t.label != PingTargetLabel::Gateway).collect();
+    let gateway = rel
+        .targets
+        .iter()
+        .find(|t| t.label == PingTargetLabel::Gateway);
+    let external: Vec<_> = rel
+        .targets
+        .iter()
+        .filter(|t| t.label != PingTargetLabel::Gateway)
+        .collect();
 
-    let local = gateway.map(|g| HopSummary { loss_pct: g.packet_loss_pct, avg_latency_ms: g.avg_ms });
+    let local = gateway.map(|g| HopSummary {
+        loss_pct: g.packet_loss_pct,
+        avg_latency_ms: g.avg_ms,
+    });
 
     let internet = if external.is_empty() {
         None
     } else {
-        let reachable: Vec<_> = external.iter().filter(|t| t.reachable && t.avg_ms.is_some()).collect();
-        let loss_pct = external.iter().map(|t| t.packet_loss_pct).fold(f64::MIN, f64::max);
+        let reachable: Vec<_> = external
+            .iter()
+            .filter(|t| t.reachable && t.avg_ms.is_some())
+            .collect();
+        let loss_pct = external
+            .iter()
+            .map(|t| t.packet_loss_pct)
+            .fold(f64::MIN, f64::max);
         let avg_latency_ms = if reachable.is_empty() {
             None
         } else {
             Some(reachable.iter().filter_map(|t| t.avg_ms).sum::<f64>() / reachable.len() as f64)
         };
-        Some(HopSummary { loss_pct, avg_latency_ms })
+        Some(HopSummary {
+            loss_pct,
+            avg_latency_ms,
+        })
     };
 
     ReliabilitySummary { local, internet }
@@ -56,7 +75,10 @@ fn render_hop(label: &str, hop: Option<HopSummary>) -> String {
     match hop {
         None => format!("  {label}: no data"),
         Some(h) => {
-            let latency = h.avg_latency_ms.map(|ms| format!("{ms:.1}ms")).unwrap_or_else(|| "unreachable".to_string());
+            let latency = h
+                .avg_latency_ms
+                .map(|ms| format!("{ms:.1}ms"))
+                .unwrap_or_else(|| "unreachable".to_string());
             format!("  {label}: {:.0}% loss, {latency}", h.loss_pct)
         }
     }
@@ -72,9 +94,20 @@ fn render_network_section(report: &Report) -> Vec<String> {
     let sec = &report.security.data;
 
     if let Some(topo) = topo {
-        let gateway_vendor = topo.neighbors.iter().find(|n| n.is_gateway).and_then(|n| n.vendor.clone());
-        let vendor_suffix = gateway_vendor.map(|v| format!(" ({v})")).unwrap_or_default();
-        lines.push(format!("  Interface: {} · {} ({})", style(&topo.interface).bold(), topo.interface_kind.as_str(), topo.ip_cidr));
+        let gateway_vendor = topo
+            .neighbors
+            .iter()
+            .find(|n| n.is_gateway)
+            .and_then(|n| n.vendor.clone());
+        let vendor_suffix = gateway_vendor
+            .map(|v| format!(" ({v})"))
+            .unwrap_or_default();
+        lines.push(format!(
+            "  Interface: {} · {} ({})",
+            style(&topo.interface).bold(),
+            topo.interface_kind.as_str(),
+            topo.ip_cidr
+        ));
         lines.push(format!("  Gateway: {}{}", topo.gateway, vendor_suffix));
     } else {
         lines.push(format!("  Topology: {}", report.topology.status.as_str()));
@@ -84,8 +117,14 @@ fn render_network_section(report: &Report) -> Vec<String> {
         if let Some(ssid) = &sec.ssid {
             lines.push(format!("  SSID: {} — {}", ssid, sec.encryption.as_str()));
             if let Some(channel) = sec.channel {
-                let freq = sec.frequency_mhz.map(|f| format!(" ({f} MHz)")).unwrap_or_default();
-                let signal = sec.signal_percent.map(|s| format!(", Signal: {s}%")).unwrap_or_default();
+                let freq = sec
+                    .frequency_mhz
+                    .map(|f| format!(" ({f} MHz)"))
+                    .unwrap_or_default();
+                let signal = sec
+                    .signal_percent
+                    .map(|s| format!(", Signal: {s}%"))
+                    .unwrap_or_default();
                 lines.push(format!("  Channel: {channel}{freq}{signal}"));
             }
         }
@@ -115,11 +154,10 @@ fn render_security_section(report: &Report) -> Vec<String> {
     let sec = &report.security.data;
 
     if let Some(sec) = sec {
-        let wifi_risk = report
-            .security
-            .findings
-            .iter()
-            .find(|f| f.id.starts_with("security.wifi-") && matches!(f.severity, Severity::Alert | Severity::Warn));
+        let wifi_risk = report.security.findings.iter().find(|f| {
+            f.id.starts_with("security.wifi-")
+                && matches!(f.severity, Severity::Alert | Severity::Warn)
+        });
         if let Some(risk) = wifi_risk {
             let styled = if risk.severity == Severity::Alert {
                 style(format!("⚠ {}", risk.title)).red()
@@ -128,7 +166,10 @@ fn render_security_section(report: &Report) -> Vec<String> {
             };
             lines.push(format!("  {styled}"));
         }
-        lines.push(format!("  DNS check: {}", describe_dns_leak(sec.dns_leak.verdict)));
+        lines.push(format!(
+            "  DNS check: {}",
+            describe_dns_leak(sec.dns_leak.verdict)
+        ));
         let portal = if sec.captive_portal.detected {
             format!("detected ({})", sec.captive_portal.method.as_str())
         } else {
@@ -143,7 +184,9 @@ fn render_security_section(report: &Report) -> Vec<String> {
 }
 
 fn ms_or_dash(value: Option<f64>) -> String {
-    value.map(|v| format!("{v:.1}ms")).unwrap_or_else(|| "—".to_string())
+    value
+        .map(|v| format!("{v:.1}ms"))
+        .unwrap_or_else(|| "—".to_string())
 }
 
 /// The per-target detail --verbose restores: everything summarize_reliability
@@ -179,7 +222,10 @@ fn render_performance_section(report: &Report, verbose: bool) -> Vec<String> {
             lines.extend(render_target_detail(rel));
         }
     } else {
-        lines.push(format!("  Reliability: {}", report.reliability.status.as_str()));
+        lines.push(format!(
+            "  Reliability: {}",
+            report.reliability.status.as_str()
+        ));
     }
 
     if let Some(speed) = speed {
@@ -200,7 +246,13 @@ pub fn render_report(report: &Report, verbose: bool) -> String {
     let level_style = level_style(report.score.level);
     let mut lines = vec![
         String::new(),
-        level_style.apply_to(format!("Risk: {:?} ({} pts)", report.score.level, report.score.total)).bold().to_string(),
+        level_style
+            .apply_to(format!(
+                "Risk: {:?} ({} pts)",
+                report.score.level, report.score.total
+            ))
+            .bold()
+            .to_string(),
         String::new(),
     ];
     lines.extend(render_network_section(report));
@@ -218,7 +270,12 @@ mod tests {
     use super::*;
     use crate::types::*;
 
-    fn target(label: PingTargetLabel, avg_ms: Option<f64>, packet_loss_pct: f64, reachable: bool) -> PingTargetResult {
+    fn target(
+        label: PingTargetLabel,
+        avg_ms: Option<f64>,
+        packet_loss_pct: f64,
+        reachable: bool,
+    ) -> PingTargetResult {
         PingTargetResult {
             host: "1.1.1.1".to_string(),
             label,
@@ -342,7 +399,13 @@ mod tests {
     #[test]
     fn local_is_the_gateway_target_directly() {
         let summary = summarize_reliability(base_report().reliability.data.as_ref().unwrap());
-        assert_eq!(summary.local, Some(HopSummary { loss_pct: 0.0, avg_latency_ms: Some(7.3) }));
+        assert_eq!(
+            summary.local,
+            Some(HopSummary {
+                loss_pct: 0.0,
+                avg_latency_ms: Some(7.3)
+            })
+        );
     }
 
     #[test]
@@ -354,7 +417,13 @@ mod tests {
             target(PingTargetLabel::CloudflareDns, Some(20.0), 0.0, true),
         ];
         let summary = summarize_reliability(&rel);
-        assert_eq!(summary.internet, Some(HopSummary { loss_pct: 20.0, avg_latency_ms: Some(15.0) }));
+        assert_eq!(
+            summary.internet,
+            Some(HopSummary {
+                loss_pct: 20.0,
+                avg_latency_ms: Some(15.0)
+            })
+        );
     }
 
     #[test]
@@ -366,7 +435,13 @@ mod tests {
             target(PingTargetLabel::CloudflareDns, Some(20.0), 0.0, true),
         ];
         let summary = summarize_reliability(&rel);
-        assert_eq!(summary.local, Some(HopSummary { loss_pct: 100.0, avg_latency_ms: None }));
+        assert_eq!(
+            summary.local,
+            Some(HopSummary {
+                loss_pct: 100.0,
+                avg_latency_ms: None
+            })
+        );
     }
 
     #[test]
@@ -464,7 +539,11 @@ mod tests {
         let security_idx = lines.iter().position(|l| *l == "Security:").unwrap();
         let perf_idx = lines.iter().position(|l| *l == "Performance:").unwrap();
         let section = &lines[security_idx..perf_idx];
-        assert!(section.iter().any(|l| l.contains("WiFi is open (unencrypted)")));
+        assert!(
+            section
+                .iter()
+                .any(|l| l.contains("WiFi is open (unencrypted)"))
+        );
     }
 
     #[test]

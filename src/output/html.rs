@@ -13,8 +13,8 @@
 //! docs/decisions/2026-08-26-html-report-output.md.
 
 use crate::types::{
-    CaptivePortalMethod, DnsLeakVerdict, Finding, InterfaceKind, PingTargetLabel, ReliabilityData, Report, RiskLevel,
-    Severity, WifiEncryption,
+    CaptivePortalMethod, DnsLeakVerdict, Finding, InterfaceKind, PingTargetLabel, ReliabilityData,
+    Report, RiskLevel, Severity, WifiEncryption,
 };
 use std::sync::OnceLock;
 use time::format_description::well_known::Rfc3339;
@@ -100,7 +100,11 @@ fn format_at(rfc3339: &str, offset: Option<UtcOffset>) -> String {
 /// general-purpose escaper — just enough to keep an adversarial SSID from
 /// breaking out of a text node or attribute.
 fn esc(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 struct Verdict {
@@ -137,27 +141,57 @@ fn verdict_for(level: RiskLevel) -> Verdict {
 fn explain(id: &str) -> Option<&'static str> {
     // Prefix matches first, for the ids that carry a target suffix.
     if id.starts_with("reliability.packet-loss") {
-        return Some("Some data is getting lost on the way to the internet. Calls and video may stutter or freeze.");
+        return Some(
+            "Some data is getting lost on the way to the internet. Calls and video may stutter or freeze.",
+        );
     }
     if id.starts_with("reliability.high-latency") {
-        return Some("The connection is slow to respond — there's noticeable lag. Video calls and games may feel delayed.");
+        return Some(
+            "The connection is slow to respond — there's noticeable lag. Video calls and games may feel delayed.",
+        );
     }
     if id.starts_with("reliability.jitter") {
-        return Some("The connection's timing is uneven, so voice and video calls may sound choppy.");
+        return Some(
+            "The connection's timing is uneven, so voice and video calls may sound choppy.",
+        );
     }
     let text = match id {
-        "security.wifi-open" => "This WiFi has no password protection at all. Someone nearby on the same network could potentially see which sites you visit. Avoid anything sensitive.",
-        "security.wifi-wpa" => "This WiFi uses WPA — an old, weak kind of password protection. Better than nothing, but not considered secure anymore.",
-        "security.wifi-wpa2" => "This WiFi uses WPA2 protection, the common standard. Fine for everyday use; the newest networks use the stronger WPA3.",
-        "security.wifi-strong" => "This WiFi uses WPA3, the strongest protection available. Nothing to worry about here.",
-        "security.dns-leak" => "Something on this network appears to be tampering with how your computer looks up websites. It could send you to fake versions of real sites. Be cautious.",
-        "security.dns-leak-uncertain" => "We couldn't fully confirm the network looks up website addresses honestly. Nothing alarming, but not a clean bill of health either.",
-        "security.dns-clean" => "The network looks up website addresses honestly — nothing is tampering with them.",
-        "security.captive-portal" => "This network has a sign-in or \u{201c}accept the terms\u{201d} page, like hotels and cafés use. That's normal — just make sure you're on the real page before typing anything.",
-        "security.no-captive-portal" => "No sign-in page stands between you and the internet — you have a direct connection.",
-        "reliability.gateway-unreachable" => "Your computer can't reliably reach the router itself. The connection may be very unstable.",
-        "reliability.internet-unreachable" => "Your computer reaches the local network but not the wider internet. You may be \u{201c}connected\u{201d} yet unable to load websites.",
-        "speed.slow-download" => "This connection is very slow to download. Web pages and video may struggle to load.",
+        "security.wifi-open" => {
+            "This WiFi has no password protection at all. Someone nearby on the same network could potentially see which sites you visit. Avoid anything sensitive."
+        }
+        "security.wifi-wpa" => {
+            "This WiFi uses WPA — an old, weak kind of password protection. Better than nothing, but not considered secure anymore."
+        }
+        "security.wifi-wpa2" => {
+            "This WiFi uses WPA2 protection, the common standard. Fine for everyday use; the newest networks use the stronger WPA3."
+        }
+        "security.wifi-strong" => {
+            "This WiFi uses WPA3, the strongest protection available. Nothing to worry about here."
+        }
+        "security.dns-leak" => {
+            "Something on this network appears to be tampering with how your computer looks up websites. It could send you to fake versions of real sites. Be cautious."
+        }
+        "security.dns-leak-uncertain" => {
+            "We couldn't fully confirm the network looks up website addresses honestly. Nothing alarming, but not a clean bill of health either."
+        }
+        "security.dns-clean" => {
+            "The network looks up website addresses honestly — nothing is tampering with them."
+        }
+        "security.captive-portal" => {
+            "This network has a sign-in or \u{201c}accept the terms\u{201d} page, like hotels and cafés use. That's normal — just make sure you're on the real page before typing anything."
+        }
+        "security.no-captive-portal" => {
+            "No sign-in page stands between you and the internet — you have a direct connection."
+        }
+        "reliability.gateway-unreachable" => {
+            "Your computer can't reliably reach the router itself. The connection may be very unstable."
+        }
+        "reliability.internet-unreachable" => {
+            "Your computer reaches the local network but not the wider internet. You may be \u{201c}connected\u{201d} yet unable to load websites."
+        }
+        "speed.slow-download" => {
+            "This connection is very slow to download. Web pages and video may struggle to load."
+        }
         "speed.failed" => "We weren't able to measure this connection's speed.",
         _ => return None,
     };
@@ -179,7 +213,9 @@ fn severity_class(sev: Severity) -> &'static str {
 }
 
 fn finding_card(f: &Finding) -> String {
-    let body = explain(&f.id).map(str::to_string).unwrap_or_else(|| esc(&f.title));
+    let body = explain(&f.id)
+        .map(str::to_string)
+        .unwrap_or_else(|| esc(&f.title));
     format!(
         "      <div class=\"card {cls}\">\n        <div class=\"card-title\">{title}</div>\n        <div class=\"card-body\">{body}</div>\n      </div>\n",
         cls = severity_class(f.severity),
@@ -202,7 +238,9 @@ fn speed_descriptor(down_mbps: f64) -> &'static str {
 fn plain_encryption(enc: WifiEncryption) -> &'static str {
     match enc {
         WifiEncryption::Wpa3 => "Strong password protection (WPA3)",
-        WifiEncryption::Wpa2 | WifiEncryption::Wpa2Enterprise => "Standard password protection (WPA2)",
+        WifiEncryption::Wpa2 | WifiEncryption::Wpa2Enterprise => {
+            "Standard password protection (WPA2)"
+        }
         WifiEncryption::Wpa => "Weak, outdated protection (WPA)",
         WifiEncryption::Open => "No password protection at all",
         WifiEncryption::Unknown => "Protection type unknown",
@@ -216,16 +254,26 @@ fn render_facts(report: &Report) -> String {
     if let Some(sec) = &report.security.data {
         if let Some(ssid) = &sec.ssid {
             rows.push(("Network name".to_string(), esc(ssid)));
-            rows.push(("WiFi protection".to_string(), plain_encryption(sec.encryption).to_string()));
+            rows.push((
+                "WiFi protection".to_string(),
+                plain_encryption(sec.encryption).to_string(),
+            ));
         } else if let Some(topo) = &report.topology.data {
             if topo.interface_kind == InterfaceKind::Ethernet {
-                rows.push(("Connection".to_string(), "Wired (Ethernet) cable".to_string()));
+                rows.push((
+                    "Connection".to_string(),
+                    "Wired (Ethernet) cable".to_string(),
+                ));
             }
         }
     }
 
     if let Some(topo) = &report.topology.data {
-        let vendor = topo.neighbors.iter().find(|n| n.is_gateway).and_then(|n| n.vendor.clone());
+        let vendor = topo
+            .neighbors
+            .iter()
+            .find(|n| n.is_gateway)
+            .and_then(|n| n.vendor.clone());
         let router = match vendor {
             Some(v) => format!("{} ({})", esc(&topo.gateway), esc(&v)),
             None => esc(&topo.gateway),
@@ -236,7 +284,12 @@ fn render_facts(report: &Report) -> String {
     if let Some(speed) = &report.speed.data {
         rows.push((
             "Speed".to_string(),
-            format!("{:.0} Mbps down · {:.0} Mbps up — {}", speed.download_mbps, speed.upload_mbps, speed_descriptor(speed.download_mbps)),
+            format!(
+                "{:.0} Mbps down · {:.0} Mbps up — {}",
+                speed.download_mbps,
+                speed.upload_mbps,
+                speed_descriptor(speed.download_mbps)
+            ),
         ));
     }
 
@@ -253,33 +306,48 @@ fn render_facts(report: &Report) -> String {
 }
 
 fn ms(v: Option<f64>) -> String {
-    v.map(|x| format!("{x:.1} ms")).unwrap_or_else(|| "—".to_string())
+    v.map(|x| format!("{x:.1} ms"))
+        .unwrap_or_else(|| "—".to_string())
 }
 
 /// The collapsed "for the curious" block: the same data the terminal
 /// --verbose view shows, laid out as tables. Present but out of the way.
 fn render_technical(report: &Report) -> String {
-    let mut html = String::from(
-        "    <details class=\"tech\">\n      <summary>Technical details</summary>\n",
-    );
+    let mut html =
+        String::from("    <details class=\"tech\">\n      <summary>Technical details</summary>\n");
 
     if let Some(topo) = &report.topology.data {
         html.push_str("      <h3>Network</h3>\n      <table class=\"kv\">\n");
-        html.push_str(&format!("        <tr><th>Interface</th><td>{} ({})</td></tr>\n", esc(&topo.interface), topo.interface_kind.as_str()));
-        html.push_str(&format!("        <tr><th>Your address</th><td>{}</td></tr>\n", esc(&topo.ip_cidr)));
-        html.push_str(&format!("        <tr><th>Gateway</th><td>{}</td></tr>\n", esc(&topo.gateway)));
+        html.push_str(&format!(
+            "        <tr><th>Interface</th><td>{} ({})</td></tr>\n",
+            esc(&topo.interface),
+            topo.interface_kind.as_str()
+        ));
+        html.push_str(&format!(
+            "        <tr><th>Your address</th><td>{}</td></tr>\n",
+            esc(&topo.ip_cidr)
+        ));
+        html.push_str(&format!(
+            "        <tr><th>Gateway</th><td>{}</td></tr>\n",
+            esc(&topo.gateway)
+        ));
         html.push_str("      </table>\n");
     }
 
     if let Some(sec) = &report.security.data {
         html.push_str("      <h3>Security</h3>\n      <table class=\"kv\">\n");
-        html.push_str(&format!("        <tr><th>Encryption</th><td>{}</td></tr>\n", sec.encryption.as_str()));
+        html.push_str(&format!(
+            "        <tr><th>Encryption</th><td>{}</td></tr>\n",
+            sec.encryption.as_str()
+        ));
         let dns = match sec.dns_leak.verdict {
             DnsLeakVerdict::Clean => "Not intercepted",
             DnsLeakVerdict::Leaked => "Intercepted",
             DnsLeakVerdict::Uncertain => "Uncertain",
         };
-        html.push_str(&format!("        <tr><th>DNS check</th><td>{dns}</td></tr>\n"));
+        html.push_str(&format!(
+            "        <tr><th>DNS check</th><td>{dns}</td></tr>\n"
+        ));
         let portal = if sec.captive_portal.detected {
             let method = match sec.captive_portal.method {
                 CaptivePortalMethod::Redirect => "redirect",
@@ -290,7 +358,9 @@ fn render_technical(report: &Report) -> String {
         } else {
             "None".to_string()
         };
-        html.push_str(&format!("        <tr><th>Captive portal</th><td>{portal}</td></tr>\n"));
+        html.push_str(&format!(
+            "        <tr><th>Captive portal</th><td>{portal}</td></tr>\n"
+        ));
         html.push_str("      </table>\n");
     }
 
@@ -300,9 +370,18 @@ fn render_technical(report: &Report) -> String {
 
     if let Some(speed) = &report.speed.data {
         html.push_str("      <h3>Speed</h3>\n      <table class=\"kv\">\n");
-        html.push_str(&format!("        <tr><th>Download</th><td>{:.1} Mbps</td></tr>\n", speed.download_mbps));
-        html.push_str(&format!("        <tr><th>Upload</th><td>{:.1} Mbps</td></tr>\n", speed.upload_mbps));
-        html.push_str(&format!("        <tr><th>Latency</th><td>{:.1} ms (jitter {:.1} ms)</td></tr>\n", speed.latency_ms, speed.jitter_ms));
+        html.push_str(&format!(
+            "        <tr><th>Download</th><td>{:.1} Mbps</td></tr>\n",
+            speed.download_mbps
+        ));
+        html.push_str(&format!(
+            "        <tr><th>Upload</th><td>{:.1} Mbps</td></tr>\n",
+            speed.upload_mbps
+        ));
+        html.push_str(&format!(
+            "        <tr><th>Latency</th><td>{:.1} ms (jitter {:.1} ms)</td></tr>\n",
+            speed.latency_ms, speed.jitter_ms
+        ));
         html.push_str("      </table>\n");
     }
 
@@ -395,8 +474,18 @@ const STYLE: &str = r#"
 pub fn render_html(report: &Report) -> String {
     let verdict = verdict_for(report.score.level);
 
-    let problems: Vec<&Finding> = report.score.findings.iter().filter(|f| is_problem(f.severity)).collect();
-    let reassurances: Vec<&Finding> = report.score.findings.iter().filter(|f| !is_problem(f.severity)).collect();
+    let problems: Vec<&Finding> = report
+        .score
+        .findings
+        .iter()
+        .filter(|f| is_problem(f.severity))
+        .collect();
+    let reassurances: Vec<&Finding> = report
+        .score
+        .findings
+        .iter()
+        .filter(|f| !is_problem(f.severity))
+        .collect();
 
     let mut body = String::new();
 
@@ -453,7 +542,12 @@ mod tests {
     use super::*;
     use crate::types::*;
 
-    fn target(label: PingTargetLabel, avg_ms: Option<f64>, packet_loss_pct: f64, reachable: bool) -> PingTargetResult {
+    fn target(
+        label: PingTargetLabel,
+        avg_ms: Option<f64>,
+        packet_loss_pct: f64,
+        reachable: bool,
+    ) -> PingTargetResult {
         PingTargetResult {
             host: "1.1.1.1".to_string(),
             label,
@@ -560,7 +654,11 @@ mod tests {
                 findings: vec![],
                 duration_ms: 20000,
             },
-            score: ScoreResult { total: 40, level: RiskLevel::High, findings: vec![wifi_open] },
+            score: ScoreResult {
+                total: 40,
+                level: RiskLevel::High,
+                findings: vec![wifi_open],
+            },
         }
     }
 
@@ -637,9 +735,18 @@ mod tests {
 
     #[test]
     fn friendly_timestamp_handles_noon_midnight_and_pm() {
-        assert_eq!(friendly_timestamp("2026-01-01T00:00:00Z"), "January 1, 2026 at 12:00 AM UTC");
-        assert_eq!(friendly_timestamp("2026-08-24T12:00:00.000Z"), "August 24, 2026 at 12:00 PM UTC");
-        assert_eq!(friendly_timestamp("2026-12-31T23:09:00Z"), "December 31, 2026 at 11:09 PM UTC");
+        assert_eq!(
+            friendly_timestamp("2026-01-01T00:00:00Z"),
+            "January 1, 2026 at 12:00 AM UTC"
+        );
+        assert_eq!(
+            friendly_timestamp("2026-08-24T12:00:00.000Z"),
+            "August 24, 2026 at 12:00 PM UTC"
+        );
+        assert_eq!(
+            friendly_timestamp("2026-12-31T23:09:00Z"),
+            "December 31, 2026 at 11:09 PM UTC"
+        );
     }
 
     #[test]
@@ -651,15 +758,24 @@ mod tests {
     fn format_at_converts_to_local_offset_and_drops_the_utc_label() {
         // 05:44 UTC at offset -07:00 is the previous evening, 10:44 PM local.
         let pdt = UtcOffset::from_hms(-7, 0, 0).unwrap();
-        assert_eq!(format_at("2026-08-27T05:44:03Z", Some(pdt)), "August 26, 2026 at 10:44 PM");
+        assert_eq!(
+            format_at("2026-08-27T05:44:03Z", Some(pdt)),
+            "August 26, 2026 at 10:44 PM"
+        );
         // A positive offset that crosses midnight forward.
         let cest = UtcOffset::from_hms(2, 0, 0).unwrap();
-        assert_eq!(format_at("2026-08-26T23:30:00Z", Some(cest)), "August 27, 2026 at 1:30 AM");
+        assert_eq!(
+            format_at("2026-08-26T23:30:00Z", Some(cest)),
+            "August 27, 2026 at 1:30 AM"
+        );
     }
 
     #[test]
     fn format_at_without_an_offset_stays_utc_labelled() {
-        assert_eq!(format_at("2026-08-24T12:00:00.000Z", None), "August 24, 2026 at 12:00 PM UTC");
+        assert_eq!(
+            format_at("2026-08-24T12:00:00.000Z", None),
+            "August 24, 2026 at 12:00 PM UTC"
+        );
     }
 
     #[test]
