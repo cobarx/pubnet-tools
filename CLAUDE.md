@@ -25,10 +25,11 @@ carry over unchanged.
 **Platforms:** Linux, macOS, and Windows, each with a `PlatformProbe` implementation.
 Non-root everywhere — nothing in `pubnetchk` requests elevated privileges.
 
-- **Linux:** `ip`, `nmcli` (NetworkManager), `resolvectl`, `ping`
-- **macOS:** `route`, `ifconfig`, `arp`, `scutil`, `networksetup`, `airport`, `ping`
-- **Windows:** PowerShell (`Get-Net*` / `Get-DnsClientServerAddress` cmdlets),
-  `netsh wlan`, `ping`. Build with the GNU toolchain — see Development setup.
+- **Linux:** `ip`, `nmcli` (NetworkManager), `resolvectl`, `ping` (shelled out to)
+- **macOS:** `route`, `ifconfig`, `arp`, `scutil`, `networksetup`, `airport`, `ping` (shelled out to)
+- **Windows:** the Win32 API directly (IP Helper + WLAN + `IcmpSendEcho2`) via
+  `windows-sys` — no child processes, no PowerShell. Build with the GNU toolchain —
+  see Development setup.
 
 ## Architecture
 
@@ -53,7 +54,8 @@ pubnet-tools
       ├── mod.rs          PlatformProbe trait + shared types (RouteInfo, AddrInfo, WifiInfo)
       ├── linux.rs        ip / nmcli / resolvectl
       ├── macos.rs        route / ifconfig / arp / airport / scutil (+ inline parsers)
-      └── windows.rs      PowerShell Get-Net* / netsh wlan (+ inline parsers)
+      └── windows.rs      Win32 API via windows-sys: GetAdaptersAddresses / GetBestRoute2 /
+                          GetIpNetTable2 / WLAN API / IcmpSendEcho2 — no shelling out
 ```
 
 **Data flow:** topology runs first and yields `gateway` + `interface`. Security,
@@ -95,10 +97,14 @@ Studio C++ build tools. Instead use the GNU toolchain:
 ```powershell
 rustup toolchain install stable-x86_64-pc-windows-gnu
 rustup override set stable-x86_64-pc-windows-gnu    # machine-local; do NOT commit a rust-toolchain.toml
-scoop install mingw                                  # provides dlltool.exe on PATH; needed for --release
+scoop install mingw                                  # dlltool.exe on PATH — needed to link windows-sys and for --release
 ```
 
-See [2026-08-27-windows-platform-support.md](docs/decisions/2026-08-27-windows-platform-support.md).
+`windows-sys` is a `[target.'cfg(windows)'.dependencies]` entry — it never touches the
+Linux/macOS build. See
+[2026-08-28-windows-probes-via-win32-api.md](docs/decisions/2026-08-28-windows-probes-via-win32-api.md)
+(and the superseded [2026-08-27](docs/decisions/2026-08-27-windows-platform-support.md)
+for the toolchain rationale).
 
 ## Conventions
 
@@ -121,9 +127,12 @@ See [2026-08-27-windows-platform-support.md](docs/decisions/2026-08-27-windows-p
 - **Empirical fixtures.** Any test input representing external-command output is a
   *real capture*, never hand-typed — see
   [the `empirical-fixtures` skill](~/Code/MetanoiaFramework/skills/empirical-fixtures/SKILL.md).
-  `tests/fixtures/capture.sh <context>` captures a new environment (Linux/macOS/Windows
-  branches); output is committed. `tests/fixtures/NEEDED.md` tracks gaps. `.gitattributes`
-  keeps fixture bytes verbatim (Windows captures are CRLF and must stay CRLF).
+  `tests/fixtures/capture.sh <context>` captures a new environment (Linux/macOS);
+  output is committed. `tests/fixtures/NEEDED.md` tracks gaps. Windows has no fixtures —
+  its probes call the Win32 API and parse no command output, so its coverage is the
+  contract tests plus pure mapping unit tests.
+- **Feature requests and known gaps are GitHub issues** (`gh issue`), not TODO comments
+  or notes buried in decision docs.
 - **Checks never throw.** All failure surfaces as `CheckResult` state.
 - **`serde` field casing is deliberate.** JSON is camelCase; enums use explicit
   `rename`/`rename_all`. Never render an enum to the user with `{:?}` — use the
@@ -137,9 +146,9 @@ See [2026-08-27-windows-platform-support.md](docs/decisions/2026-08-27-windows-p
   probes. If both are blocked, the verdict is `uncertain` — never a false "no leak".
 - **Scanning all interfaces.** `ip addr` / `ifconfig` / `Get-NetIPAddress` show virtual
   and VMware interfaces. Always follow the default route's device.
-- **`ping -i` below 0.2 on Linux** (non-root floor is 200ms). And on **Windows `-i` is
-  the TTL, not an interval** — Windows uses `ping -n <count> -w <ms>`, selected via
-  `#[cfg(windows)]` in `reliability.rs`. The Windows check therefore takes ~10s.
+- **`ping -i` below 0.2 on Linux** (non-root floor is 200ms). `reliability.rs` shells
+  out to `ping` on Linux/macOS; on Windows it sends ICMP echoes via `IcmpSendEcho2`
+  (no `ping.exe`, no ~1s floor) — the seam is `system_ping`, `#[cfg]`-split.
 - **Root.** Nothing requires or requests elevated privileges. `iw scan` is excluded for
   this reason.
 - **Proprietary speed-test services, unless no open-source option covers the need.**
@@ -180,7 +189,8 @@ See [2026-08-27-windows-platform-support.md](docs/decisions/2026-08-27-windows-p
   - [2026-08-25-rust-rewrite-technology-stack.md](docs/decisions/2026-08-25-rust-rewrite-technology-stack.md) — every Rust crate vs its alternative and the TS dep it replaces
   - [2026-08-26-rust-becomes-canonical-implementation.md](docs/decisions/2026-08-26-rust-becomes-canonical-implementation.md) — Rust is canonical; TS moved to `typescript-archive`
   - [2026-08-26-rename-to-pubnet-tools.md](docs/decisions/2026-08-26-rename-to-pubnet-tools.md) — `conncheck` → `pubnetchk` / crate `pubnet-tools`
-  - [2026-08-27-windows-platform-support.md](docs/decisions/2026-08-27-windows-platform-support.md) — GNU toolchain, PowerShell `Get-Net*` probes, Windows `ping` argument/format differences
+  - [2026-08-27-windows-platform-support.md](docs/decisions/2026-08-27-windows-platform-support.md) — GNU toolchain (still current); PowerShell probe mechanism (**superseded**)
+  - [2026-08-28-windows-probes-via-win32-api.md](docs/decisions/2026-08-28-windows-probes-via-win32-api.md) — Windows probes call the Win32 API directly (`windows-sys`); no PowerShell/netsh/ping.exe; why the fixture corpus was dropped
 - [docs/context/](docs/context/) — observed network behavior and domain background;
   read when debugging a check that misbehaves on a specific network
   - [network-behavior.md](docs/context/network-behavior.md) — live recon findings (captive portals, Quad9 blocking, nmcli quirks, VMware interfaces)
