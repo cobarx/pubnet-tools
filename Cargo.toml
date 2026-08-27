@@ -22,6 +22,20 @@ time = { version = "0.3.55", features = ["formatting", "parsing"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "process", "fs"] }
 tokio-tungstenite = { version = "0.30.0", features = ["native-tls"] }
 
+# Windows probes call the Win32 API directly (IP Helper + WLAN + ICMP) rather
+# than shelling out to PowerShell/netsh/ping.exe — see
+# docs/decisions/2026-08-28-windows-probes-via-win32-api.md. Already a transitive
+# dep via tokio; this only enables the network feature modules. Windows-only.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_IO",
+    "Win32_Networking_WinSock",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_WiFi",
+] }
+
 [dev-dependencies]
 tempfile = "3.27.0"
 
