@@ -98,14 +98,20 @@ the DNS-interception verdict is `uncertain` there rather than `clean`/`leaked`.
 git clone https://github.com/cobarx/pubnet-tools
 cd pubnet-tools
 
-cargo build                 # debug
-cargo build --release       # target/release/pubnetchk (~2.8–5 MB)
-cargo test --lib            # unit tests — fast, no network
-cargo test                 # + contract tests: hit real commands and real endpoints (need live network)
-cargo clippy --all-targets
+just build                  # debug — also sets execute bit for MSYS2/zsh (see Windows note)
+just release                # release — target/release/pubnetchk + pubnetdiag
+just test                   # unit tests — fast, no network
+just test-all               # + contract tests: hit real commands and real endpoints (need live network)
+just clippy
 cargo run -p pubnet-tools -- --json | jq .  # JSON mode
 cargo run -p pubnet-tools -- --no-speed     # skip a check while iterating
 ```
+
+`just` is a cross-platform command runner (`scoop install just`). The `justfile`
+at the repo root wraps the common cargo invocations and, on Windows, runs
+`chmod +x` on the output binaries so they are executable from MSYS2/zsh. In
+PowerShell the chmod line fails silently (the `-` prefix suppresses the error);
+in PowerShell you can also use `cargo build` / `cargo build --release` directly.
 
 **Windows toolchain.** The default `x86_64-pc-windows-msvc` target needs the Visual
 Studio C++ build tools. Instead use the GNU toolchain:
@@ -114,6 +120,7 @@ Studio C++ build tools. Instead use the GNU toolchain:
 rustup toolchain install stable-x86_64-pc-windows-gnu
 rustup override set stable-x86_64-pc-windows-gnu    # machine-local; do NOT commit a rust-toolchain.toml
 scoop install mingw                                  # dlltool.exe on PATH — needed to link windows-sys and for --release
+scoop install just                                   # command runner for just build / just release
 ```
 
 `windows-sys` is a `[target.'cfg(windows)'.dependencies]` entry in `crates/pubnet-platform/Cargo.toml` — it never touches the
