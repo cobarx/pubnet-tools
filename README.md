@@ -12,50 +12,108 @@ Runs four checks and scores the result Low / Medium / High risk:
 
 - **Security** — WiFi encryption (WPA3/WPA2/Open), DNS interception via DNS-over-HTTPS, captive portal detection
 - **Speed** — download, upload, latency, jitter via M-Lab's open NDT7 protocol
-- **Reliability** — ping/jitter/packet loss to gateway, 8.8.8.8, and 1.1.1.1
+- **Reliability** — ping/jitter/packet loss to your gateway (the router you're connected to) and two well-known public DNS servers: Google's `8.8.8.8` and Cloudflare's `1.1.1.1`
 - **Topology** — passive ARP cache (no active scanning)
 
-Pass `--save` to write a full JSON report to `~/.pubnetchk/reports/`.
+Nothing here needs root, and topology is passive-only — it reads the ARP cache, it
+never scans. pubnetchk reports what it finds; it doesn't fix it. If a run flags
+something about the DNS resolver you're using,
+[docs/context/dns-hardening.md](docs/context/dns-hardening.md) covers what that actually
+means and how to change it.
 
-pubnetchk reports what it finds; it doesn't fix it. If a run flags something about the
-DNS resolver you're using, [docs/context/dns-hardening.md](docs/context/dns-hardening.md)
-covers what that actually means and how to change it.
+## Setting up the build environment
 
-## Requirements
+You need a Rust toolchain (edition 2024). [`rustup`](https://rustup.rs) is the easiest
+way to get one:
 
-- Rust (edition 2024 toolchain — `rustup` is the easiest way to get one)
-- **Linux:** `nmcli` (NetworkManager), `ip`, `ping`, `resolvectl`
-- **macOS:** `route`, `ifconfig`, `arp`, `scutil`, `networksetup`, `ping` (all built in)
-- **Windows 10+:** nothing extra at runtime — the probes call the Win32 API directly.
-  Build with the GNU toolchain (`rustup default stable-x86_64-pc-windows-gnu` +
-  `scoop install mingw` on `PATH`) — the MSVC toolchain needs the Visual Studio C++
-  build tools. `record` is not supported on Windows; DNS-interception detection is
-  limited (reports `uncertain`).
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
 
-## Installation
+The runtime prerequisites depend on your OS:
+
+### Linux
+
+Uses `nmcli` (NetworkManager), `ip` (iproute2), `resolvectl` (systemd), and `ping` —
+all present on a standard desktop distro. Building also needs the system OpenSSL
+development headers for the TLS stack:
+
+```bash
+# Debian / Ubuntu
+sudo apt install build-essential pkg-config libssl-dev
+
+# Fedora
+sudo dnf install @development-tools pkg-config openssl-devel
+```
+
+### macOS
+
+Everything the probes call (`route`, `ifconfig`, `arp`, `scutil`, `networksetup`,
+`ping`) ships with the OS. Install the Xcode command-line tools for a linker:
+
+```bash
+xcode-select --install
+```
+
+### Windows 10+
+
+The probes call the Win32 API directly, so there's nothing extra at runtime. For
+building, use the **GNU toolchain** — the default MSVC toolchain would pull in the
+Visual Studio C++ build tools:
+
+```powershell
+rustup toolchain install stable-x86_64-pc-windows-gnu
+rustup override set stable-x86_64-pc-windows-gnu    # run inside the repo; machine-local
+scoop install mingw                                  # puts dlltool.exe on PATH
+```
+
+The override is deliberately local — don't commit a `rust-toolchain.toml`, or you'd
+force the GNU toolchain on Linux/macOS contributors too. On Windows, `record` is
+unsupported and DNS-interception detection reports `uncertain`.
+
+## Building
 
 ```bash
 git clone https://github.com/cobarx/pubnet-tools
 cd pubnet-tools
-cargo build --release
+
+cargo build --release        # optimized binary at target/release/pubnetchk
+cargo build                  # faster debug build at target/debug/pubnetchk
 ```
 
-The binary is then at `target/release/pubnetchk`. To get a global `pubnetchk` command
-on your `PATH` instead, run `cargo install --path .`.
+To install a global `pubnetchk` command on your `PATH`:
+
+```bash
+cargo install --path .
+```
 
 ## Usage
 
+Run it right after joining a network. With no arguments it runs the full audit and
+prints a scored terminal report:
+
 ```bash
-./target/release/pubnetchk              # full audit with terminal output
-./target/release/pubnetchk --json | jq . # JSON to stdout (pipe-friendly)
-./target/release/pubnetchk --save        # also write the report to ~/.pubnetchk/reports/
-./target/release/pubnetchk -v            # add per-target reliability detail
-./target/release/pubnetchk --no-speed    # skip a specific check (also: --no-topology/--no-security/--no-reliability)
-./target/release/pubnetchk -q            # quick mode: shorter speed test
-./target/release/pubnetchk record        # wrap in asciinema for session recording
+pubnetchk
+```
+
+Common options:
+
+```bash
+pubnetchk --json | jq .        # JSON to stdout (pipe-friendly, no spinners)
+pubnetchk --save               # also write a JSON report to ~/.pubnetchk/reports/
+pubnetchk --html --open        # write a plain-language HTML report and open it
+pubnetchk -q                   # quick mode: shorter speed test
+pubnetchk -v                   # add per-target reliability detail
+pubnetchk --no-speed           # skip a check (also --no-topology/--no-security/--no-reliability)
+pubnetchk --only security,speed # run only the named checks (topology,security,reliability,speed)
+pubnetchk --strict             # exit non-zero on Medium/High risk (for scripts)
+pubnetchk record               # wrap the run in asciinema for session capture
 ```
 
 Full flag reference: `pubnetchk --help`.
+
+If you built without installing, the binary is at `./target/release/pubnetchk` (or
+`./target/debug/pubnetchk`) — use that path in place of `pubnetchk` above.
 
 ## Open source
 
