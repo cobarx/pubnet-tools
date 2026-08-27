@@ -35,6 +35,28 @@ use windows_sys::Win32::Networking::WinSock::{
 /// `IcmpCreateFile` failure sentinel.
 const INVALID_HANDLE_VALUE: HANDLE = -1isize as HANDLE;
 
+// Compile-time layout checks. Each one is a property the `unsafe` below
+// actually relies on, stated from the documented C layout — if a `windows-sys`
+// bump (or a wrong feature set) changed a struct out from under us, the build
+// stops here instead of silently reading the wrong bytes. Not a full offset
+// audit — that's `windows-sys`'s job, and the topology contract test's
+// gateway-in-subnet check is the real cross-check on a live machine.
+const _: () = {
+    use std::mem::{align_of, size_of};
+    // The ICMP reply buffer is `[u64; _]`; the `&ICMP_ECHO_REPLY` read out of
+    // it is only sound if that alignment is enough.
+    assert!(align_of::<ICMP_ECHO_REPLY>() <= 8);
+    // `sockaddr_ptr_ipv4` does `read_unaligned::<SOCKADDR_IN>` from a pointer
+    // the OS only guarantees points to `sizeof(sockaddr_in)` == 16 bytes.
+    assert!(size_of::<SOCKADDR>() == 16);
+    assert!(size_of::<SOCKADDR_IN>() == 16);
+    assert!(size_of::<IN_ADDR>() == 4);
+    // `.Luid.Value` / `.InterfaceLuid.Value` read the whole union as one u64.
+    assert!(size_of::<windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH>() == 8);
+    // `list_adapters` casts a `Vec<u64>` (align 8) buffer to this.
+    assert!(align_of::<IP_ADAPTER_ADDRESSES_LH>() <= 8);
+};
+
 // Defensive upper bounds on anything the OS reports as a count or length. A
 // real machine is orders of magnitude below every one of these; a value past
 // the bound means the data is malformed, and we clamp/stop rather than feed it

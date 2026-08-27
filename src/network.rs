@@ -303,6 +303,23 @@ pub fn is_valid_ipv4(s: &str) -> bool {
     }
 }
 
+/// True when `ip` falls inside the network `cidr` describes — e.g.
+/// `"192.168.1.5"` in `"192.168.1.0/24"`. `None` if either side doesn't parse
+/// as IPv4 / `a.b.c.d/n`. Used by the topology contract test to check the
+/// gateway is on the interface's own subnet (a real L2 invariant, and a cheap
+/// cross-field check on the platform probe).
+pub fn ipv4_in_cidr(ip: &str, cidr: &str) -> Option<bool> {
+    let ip: std::net::Ipv4Addr = ip.parse().ok()?;
+    let (network, prefix) = cidr.split_once('/')?;
+    let network: std::net::Ipv4Addr = network.parse().ok()?;
+    let prefix: u32 = prefix.trim().parse().ok()?;
+    if prefix > 32 {
+        return None;
+    }
+    let mask = if prefix == 0 { 0 } else { u32::MAX << (32 - prefix) };
+    Some(u32::from(ip) & mask == u32::from(network) & mask)
+}
+
 /// Extracts a `remote_ip` value from raw response text — tolerant of
 /// resolvectl's quoted TXT line, Google DoH's unquoted `data` field, and
 /// Cloudflare DoH's escaped-quote `data` field, without needing to parse
@@ -574,6 +591,26 @@ mod tests {
         assert_eq!(ip_family("192.168.5.151"), IpFamily::V4);
         assert_eq!(ip_family("2607:f8b0:4004:1001::12e"), IpFamily::V6);
         assert_eq!(ip_family("::1"), IpFamily::V6);
+    }
+
+    // --- ipv4_in_cidr ---
+
+    #[test]
+    fn ipv4_in_cidr_matches_within_and_rejects_outside() {
+        assert_eq!(ipv4_in_cidr("192.168.1.5", "192.168.1.0/24"), Some(true));
+        assert_eq!(ipv4_in_cidr("192.168.1.1", "192.168.1.247/24"), Some(true)); // cidr host bits ignored
+        assert_eq!(ipv4_in_cidr("192.168.2.5", "192.168.1.0/24"), Some(false));
+        assert_eq!(ipv4_in_cidr("10.0.0.9", "10.0.0.8/30"), Some(true));
+        assert_eq!(ipv4_in_cidr("10.0.0.12", "10.0.0.8/30"), Some(false));
+        assert_eq!(ipv4_in_cidr("8.8.8.8", "0.0.0.0/0"), Some(true)); // default route
+    }
+
+    #[test]
+    fn ipv4_in_cidr_none_on_bad_input() {
+        assert_eq!(ipv4_in_cidr("nope", "192.168.1.0/24"), None);
+        assert_eq!(ipv4_in_cidr("192.168.1.5", "192.168.1.0"), None); // no prefix
+        assert_eq!(ipv4_in_cidr("192.168.1.5", "192.168.1.0/33"), None);
+        assert_eq!(ipv4_in_cidr("::1", "192.168.1.0/24"), None); // v6
     }
 
     // --- extract_remote_ip ---
