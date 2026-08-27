@@ -125,11 +125,36 @@ of review, not after a long bake.
   unreliable across Windows versions — `WLAN_ASSOCIATION_ATTRIBUTES` has enough to
   derive the band but not the channel.
 
+## The `unsafe` surface
+
+Every FFI call, pointer dereference, linked-list walk, union field read, and
+`mem::zeroed()` out-param is `unsafe`. It stays sound because:
+
+- **`windows-sys` models every "enum" as a plain `i32`/`u32`**, so `mem::zeroed()` on
+  the MIB out-param structs is a valid value (no forbidden bit patterns) — the same
+  code against the `windows` crate's real enums would be UB.
+- **Backing buffers outlive every pointer walk** — `list_adapters`'s `Vec<u64>` (8-byte
+  aligned, which is what `IP_ADAPTER_ADDRESSES_LH` needs), the OS-allocated MIB tables,
+  the WLAN blobs. MIB tables are `FreeMibTable`'d and the WLAN handle + blobs are freed
+  by `Drop` guards, on every exit path.
+- **Sockaddr reads use `ptr::read_unaligned`** (`SOCKET_ADDRESS.lpSockaddr` isn't
+  documented to be `SOCKADDR_IN`-aligned); the ICMP reply buffer is `[u64]`-backed so
+  the `ICMP_ECHO_REPLY` read is aligned.
+- **A validation layer bounds everything the OS reports.** `MAX_ADAPTERS` /
+  `MAX_NEIGHBORS` / `MAX_WLAN_INTERFACES` clamp any count before it reaches
+  `slice::from_raw_parts` (clamping only ever shortens a slice); linked-list walks and
+  the wide-string reader are iteration-capped; addresses are checked with
+  `is_plausible_host_ipv4` (unicast, not loopback/multicast/broadcast/`0.0.0.0`),
+  prefix lengths against `0..=32`, channel against `1..=196`, and every returned blob's
+  size against `size_of::<T>()` before it is dereferenced.
+
+Enum/byte mappings and the validators are unit-tested; the pointer-walking itself is
+only exercisable by the contract tests on a real machine.
+
 ## Consequences
 
 - **New dependency:** `windows-sys` (Windows target only). `src/platform/windows.rs` is
-  rewritten around FFI — roughly 2–3× the line count of the PowerShell version, with
-  `unsafe` blocks for every API call and linked-list/variable-buffer walking, isolated
+  rewritten around FFI — roughly 2–3× the line count of the PowerShell version, isolated
   behind the unchanged `PlatformProbe` trait so `cli.rs` and the contract tests need no
   change beyond the ping seam.
 - **`check_reliability`'s signature changes.** Was generic over
