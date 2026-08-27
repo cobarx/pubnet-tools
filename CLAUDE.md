@@ -1,97 +1,189 @@
-# conncheck
+# pubnet-tools
 
 ## Summary
 
-conncheck is a TypeScript CLI that audits the public WiFi or network you just joined. It checks security posture (WiFi encryption, DNS leak, captive portal), speed (M-Lab's open NDT7 protocol, implemented directly over WebSocket), reliability (ping/jitter/packet loss to three targets), and passive network topology (ARP cache only — no active scanning). Results are scored Low/Medium/High risk and saved as a JSON report. A `record` subcommand wraps the run in asciinema for session capture.
+`pubnetchk` is a Rust CLI that audits the public WiFi or network you just joined. It
+checks security posture (WiFi encryption, DNS interception, captive portal), speed
+(M-Lab's open NDT7 protocol, implemented directly over WebSocket), reliability
+(ping/jitter/packet loss to three targets), and passive network topology (ARP cache
+only — no active scanning). Results are scored Low/Medium/High risk and, with `--save`,
+written as a JSON report. A `record` subcommand wraps the run in asciinema for session
+capture (not on Windows).
 
-Built as a blog post project. Technology rationale is a first-class concern — every dependency is justified against its alternatives in `docs/decisions/`.
+It is the first binary of a planned `pubnet-tools` suite (`pubnetstat`, `pubnettop` —
+not yet built). Built as a blog post project. Technology rationale is a first-class
+concern — every dependency is justified against its alternatives in `docs/decisions/`.
 
-**Platform:** Linux (CachyOS / Arch-based), non-root user. Node ≥ 24 (`.nvmrc` pins 24).
+The project began as a TypeScript CLI (`conncheck`); the Rust rewrite is now canonical
+(see [2026-08-26-rust-becomes-canonical-implementation.md](docs/decisions/2026-08-26-rust-becomes-canonical-implementation.md)
+— the TS tree was archived to a local `typescript-archive` branch; only `main` exists
+on `origin`), and the rename is recorded in
+[2026-08-26-rename-to-pubnet-tools.md](docs/decisions/2026-08-26-rename-to-pubnet-tools.md).
+The specs in `docs/specs/` and the pre-rewrite decisions are behavior contracts and
+carry over unchanged.
+
+**Platforms:** Linux, macOS, and Windows, each with a `PlatformProbe` implementation.
+Non-root everywhere — nothing in `pubnetchk` requests elevated privileges.
+
+- **Linux:** `ip`, `nmcli` (NetworkManager), `resolvectl`, `ping`
+- **macOS:** `route`, `ifconfig`, `arp`, `scutil`, `networksetup`, `airport`, `ping`
+- **Windows:** PowerShell (`Get-Net*` / `Get-DnsClientServerAddress` cmdlets),
+  `netsh wlan`, `ping`. Build with the GNU toolchain — see Development setup.
 
 ## Architecture
 
 ```
-conncheck
-  ├── src/index.ts        shebang entry point (#!/usr/bin/env tsx), no logic
-  ├── src/cli.ts          commander setup, orchestrates checks, manages spinners
-  ├── src/types.ts        all interfaces and discriminated unions, zero runtime code
-  ├── src/scoring.ts      pure function: CheckResult[] → { total, level, findings }
+pubnet-tools
+  ├── src/main.rs         #[tokio::main], calls cli::run() — no logic
+  ├── src/lib.rs          module declarations only
+  ├── src/cli.rs          clap setup, orchestrates checks, manages the shared spinner
+  ├── src/types.rs        all structs and enums, serde derives, CheckResult<T> — no logic
+  ├── src/scoring.rs      pure function: &[ScorableResult] → { total, level, findings }
+  ├── src/exec.rs         tokio process wrapper, array argv (no shell), never Errs on non-zero exit
+  ├── src/network.rs      pure synchronous parsers + classification helpers for command output
   ├── src/checks/
-  │   ├── topology.ts     ip route/addr/neigh — passive only, seeds gateway for others
-  │   ├── security.ts     nmcli + resolvectl + DoH probes + captive portal (axios)
-  │   ├── reliability.ts  ping -c 10 -i 0.2, Promise.allSettled, per-packet RTT parsing
-  │   └── speed.ts        NDT7 (M-Lab) client over `ws`, hand-rolled protocol — see decisions/
+  │   ├── topology.rs     default route → interface → addr/neigh; passive only; seeds gateway
+  │   ├── security.rs     WiFi info + DNS servers + DoH probes + captive portal (reqwest)
+  │   ├── reliability.rs  ping ×10, join_all over targets, per-packet RTT parsing
+  │   └── speed.rs        NDT7 (M-Lab) client over tokio-tungstenite, hand-rolled protocol
   ├── src/output/
-  │   ├── renderer.ts     chalk only, condensed Network/Security/Performance sections, never calls network
-  │   └── reporter.ts     saves JSON to ~/.conncheck/reports/<timestamp>.json
-  └── src/utils/
-      ├── exec.ts         spawn wrapper, no shell injection, LC_ALL=C, never rejects
-      └── network.ts      pure synchronous parsers for all shell output
+  │   ├── renderer.rs     console only, condensed Network/Security/Performance sections, never calls network
+  │   └── reporter.rs     writes JSON to ~/.pubnetchk/reports/<timestamp>.json (only with --save)
+  └── src/platform/
+      ├── mod.rs          PlatformProbe trait + shared types (RouteInfo, AddrInfo, WifiInfo)
+      ├── linux.rs        ip / nmcli / resolvectl
+      ├── macos.rs        route / ifconfig / arp / airport / scutil (+ inline parsers)
+      └── windows.rs      PowerShell Get-Net* / netsh wlan (+ inline parsers)
 ```
 
-**Data flow:** topology runs first and yields `gatewayIp` + `interface`. All other checks run concurrently. scoring is a pure function over all results. render and save happen after all checks complete.
+**Data flow:** topology runs first and yields `gateway` + `interface`. Security,
+reliability, and speed then run concurrently (`tokio::join!`). scoring is a pure
+function over all four results. render and save happen after all checks complete.
 
-**CheckResult<T> contract:** checks never throw. Status is one of `ok | degraded | failed | skipped`. `data` is null only when status is `failed` or `skipped`. Callers inspect `status` and `errors[]`, never catch exceptions from checks.
+**`CheckResult<T>` contract:** checks never throw / never return `Err`. `status` is one
+of `ok | degraded | failed | skipped`. `data` is `None` only when status is `failed`
+or `skipped`. Callers inspect `status` and `errors`, never propagate a panic out of a
+check. Only a genuine spawn failure (binary not found) surfaces as an `Err` from
+`exec.rs`, and it's caught at the check level.
+
+**`PlatformProbe`** (`src/platform/mod.rs`) is the OS-abstraction seam: seven async
+methods (`default_route`, `interface_addr`, `arp_neighbors`, `wifi_info`, `dns_info`,
+`system_egress_ip`, `interface_type`) returning common types. Checks call probe
+methods — they never invoke a platform-specific binary directly. Adding an OS is one
+new file implementing the trait plus a `#[cfg(target_os = "…")]` arm in `cli.rs` and in
+the three contract tests. `system_egress_ip` returns `None` on macOS and Windows, so
+the DNS-interception verdict is `uncertain` there rather than `clean`/`leaked`.
 
 ## Development setup
 
 ```bash
-# Working directory. Note: /home/maxwell/Projects/ConnectionChecker is a symlink into
-# the Google Drive Insync path below, not a separate copy — but isolation from sync
-# races is real anyway: `insync ignore-rules list` shows node_modules (and, as of
-# 2026-08-25, target for the Rust rewrite) are excluded as global gitignore-style
-# patterns at the Insync application level, not via directory choice. If a future
-# build tool adds another heavy/ephemeral output directory, add it the same way
-# (`insync ignore-rules add <dirname>`) rather than relying on working-directory tricks.
-cd /home/maxwell/Projects/ConnectionChecker
+git clone https://github.com/cobarx/pubnet-tools
+cd pubnet-tools
 
-npm install
-npm run typecheck        # tsc --noEmit
-npm run test             # vitest run --reporter=verbose (contract/workflow levels need live network)
-npm link                 # installs conncheck globally via symlink
-conncheck                # full run
-conncheck --json | jq .  # JSON mode
-conncheck record         # wraps in asciinema
+cargo build                 # debug
+cargo build --release       # target/release/pubnetchk (~2.8–5 MB)
+cargo test --lib            # unit tests — fast, no network
+cargo test                 # + contract tests: hit real commands and real endpoints (need live network)
+cargo clippy --all-targets
+cargo run -- --json | jq .  # JSON mode
+cargo run -- --no-speed     # skip a check while iterating
 ```
+
+**Windows toolchain.** The default `x86_64-pc-windows-msvc` target needs the Visual
+Studio C++ build tools. Instead use the GNU toolchain:
+
+```powershell
+rustup toolchain install stable-x86_64-pc-windows-gnu
+rustup override set stable-x86_64-pc-windows-gnu    # machine-local; do NOT commit a rust-toolchain.toml
+scoop install mingw                                  # provides dlltool.exe on PATH; needed for --release
+```
+
+See [2026-08-27-windows-platform-support.md](docs/decisions/2026-08-27-windows-platform-support.md).
 
 ## Conventions
 
-- **Spec-driven, test-driven.** Load-bearing/conditional behavior is specified in `docs/specs/` (Given-When-Then, per [MetanoiaFramework's `spec` skill](~/Projects/MetanoiaFramework/skills/spec/SKILL.md)) *before* it's implemented, and implemented test-first (per [MetanoiaFramework's `tdd` skill](~/Projects/MetanoiaFramework/skills/tdd/SKILL.md)). Pure scaffolding (types, config, the exec wrapper) doesn't need a spec. A test cites the scenario it implements as `# spec: <slug>#S<n>`.
-- **ESM imports require `.js` extensions.** `NodeNext` moduleResolution enforces this at compile time. `import { x } from './utils/exec.js'` — never omit the extension.
-- **Checks never throw.** All failures surface as `CheckResult` state. Only actual spawn failures (`ENOENT`) throw, caught at the check level.
-- **Tests are organized by scope, not entry point — never "e2e".** `tests/unit/` (single module, everything else mocked), `tests/contract/` (one real boundary — a real shell command or real network endpoint), `tests/workflow/` (the full CLI, nothing mocked). Contract and workflow tests assert on shape, not exact values — real networks vary; test that `verdict` is one of the three valid strings, not that it equals `'clean'`.
-- **No mocks in contract/workflow tests.** They hit real system commands and real network endpoints. `testTimeout: 60_000`. Unit tests are the only level that mocks anything, and most of what's mockable here (shell output parsing, scoring) doesn't need to — it's pure functions over string/data fixtures.
-- **`noUncheckedIndexedAccess: true`** in tsconfig. Every array access on shell output is guarded at compile time.
+- **Spec-driven, test-driven.** Load-bearing/conditional behavior is specified in
+  `docs/specs/` (Given-When-Then, per
+  [MetanoiaFramework's `spec` skill](~/Code/MetanoiaFramework/skills/spec/SKILL.md))
+  *before* an implementation approach is chosen, and implemented test-first (per
+  [the `tdd` skill](~/Code/MetanoiaFramework/skills/tdd/SKILL.md)). Pure scaffolding
+  (types, the exec wrapper, the platform trait) doesn't need a spec. A test cites the
+  scenario it implements as `// spec: <slug>#S<n>`.
+- **Test levels are by scope, not entry point — never "e2e".**
+  - *Unit* — inline `#[cfg(test)] mod tests` in the module. Everything is a pure
+    function over a string/data fixture; almost nothing is mocked because almost
+    nothing needs to be.
+  - *Contract* — `tests/*.rs` (`topology.rs`, `security.rs`, `reliability.rs`,
+    `speed.rs`). One real boundary: a real system command or a real network endpoint.
+    `#[cfg]`-selects the platform probe. No mocks.
+  - Contract tests **assert on shape, not exact values** — real networks vary. Check
+    that `verdict` is one of the three valid strings, not that it equals `clean`.
+- **Empirical fixtures.** Any test input representing external-command output is a
+  *real capture*, never hand-typed — see
+  [the `empirical-fixtures` skill](~/Code/MetanoiaFramework/skills/empirical-fixtures/SKILL.md).
+  `tests/fixtures/capture.sh <context>` captures a new environment (Linux/macOS/Windows
+  branches); output is committed. `tests/fixtures/NEEDED.md` tracks gaps. `.gitattributes`
+  keeps fixture bytes verbatim (Windows captures are CRLF and must stay CRLF).
+- **Checks never throw.** All failure surfaces as `CheckResult` state.
+- **`serde` field casing is deliberate.** JSON is camelCase; enums use explicit
+  `rename`/`rename_all`. Never render an enum to the user with `{:?}` — use the
+  `as_str()` methods, which match the JSON form (see the note on `PingTargetLabel`).
 
 ## What to avoid
 
-- **Hostname ping targets.** Captive networks break DNS for ICMP. Always use numeric IPs (`1.1.1.1`, `8.8.8.8`).
-- **Quad9 DoH.** Blocked on many public networks. Use only Cloudflare and Google DoH probes.
-- **Scanning all interfaces.** `ip addr` shows VMware virtual interfaces. Always follow `ip route show default`'s `dev` field.
-- **`ping -i 0.1`.** Non-root minimum interval is 200ms on Linux. Use `-i 0.2`.
-- **Root.** Nothing in conncheck requires or requests elevated privileges. `iw scan` is excluded for this reason.
-- **Proprietary speed test services, unless no open-source option covers the need.** Ookla EULA §14 prohibits automated use; fast.com is Netflix's closed service. Open source is still the default and every dependency still needs justifying — see [open-source-only decision](docs/decisions/2026-08-02-open-source-only.md) and the narrower fallback carved out in [2026-08-24-ookla-permitted-as-fallback.md](docs/decisions/2026-08-24-ookla-permitted-as-fallback.md).
-- **Active scanning for topology.** Passive ARP cache only. See [passive-topology decision](docs/decisions/2026-08-02-passive-topology.md).
-- **A bare `#!/usr/bin/env tsx` shebang.** Works in dev (tsx is resolved via `npm run`/`npx`), but breaks after `npm link`: `env` looks for a globally-installed `tsx` binary, which a devDependency isn't. Use `#!/usr/bin/env -S node --import tsx/esm` instead — Node resolves `tsx/esm` through the real project's `node_modules` (following the symlink `npm link` creates), no global tsx install required.
+- **Hostname ping targets.** Captive networks break DNS for ICMP. Always use numeric
+  IPs (`1.1.1.1`, `8.8.8.8`).
+- **Quad9 DoH.** Blocked on many public networks. Use only Cloudflare and Google DoH
+  probes. If both are blocked, the verdict is `uncertain` — never a false "no leak".
+- **Scanning all interfaces.** `ip addr` / `ifconfig` / `Get-NetIPAddress` show virtual
+  and VMware interfaces. Always follow the default route's device.
+- **`ping -i` below 0.2 on Linux** (non-root floor is 200ms). And on **Windows `-i` is
+  the TTL, not an interval** — Windows uses `ping -n <count> -w <ms>`, selected via
+  `#[cfg(windows)]` in `reliability.rs`. The Windows check therefore takes ~10s.
+- **Root.** Nothing requires or requests elevated privileges. `iw scan` is excluded for
+  this reason.
+- **Proprietary speed-test services, unless no open-source option covers the need.**
+  Ookla EULA §14 prohibits automated use; fast.com is Netflix's closed service. See
+  [open-source-only](docs/decisions/2026-08-02-open-source-only.md) and the narrow
+  fallback in [2026-08-24-ookla-permitted-as-fallback.md](docs/decisions/2026-08-24-ookla-permitted-as-fallback.md).
+- **Active scanning for topology.** Passive ARP cache only. See
+  [passive-topology](docs/decisions/2026-08-02-passive-topology.md).
+- **Committing a `rust-toolchain.toml`.** The Windows GNU-toolchain override is
+  machine-local on purpose — pinning it would force the GNU toolchain on Linux/macOS
+  contributors.
+- **A system-OpenSSL dependency.** `reqwest`/`tokio-tungstenite` use `native-tls`
+  (SChannel on Windows, Secure Transport on macOS, system OpenSSL only on Linux). Keep
+  it that way — verify with `cargo tree` after touching an HTTP/TLS dependency.
 
 ## Documentation index
 
 - [README.md](README.md) — public-facing overview, installation, and usage
-- [PLAN.md](PLAN.md) — original implementation plan with interfaces, file-by-file breakdown, and pitfalls; general parameters (checks, scoring model, report shape, tech stack) still hold, but `docs/specs/` is the authoritative behavior contract where the two differ
-- [docs/specs/](docs/specs/) — what the system must do, in Given-When-Then scenarios, written before an implementation approach is chosen; cite scenarios by `<slug>#S<n>` from tests
-- [docs/decisions/](docs/decisions/) — why key architectural and technology choices were made; read before changing a dependency or adding a new check
-  - [2026-08-02-open-source-only.md](docs/decisions/2026-08-02-open-source-only.md) — why MIT/Apache only; why Ookla and fast.com are excluded
+- [PLAN.md](PLAN.md) — the original (TypeScript-era) implementation plan; the general
+  parameters (checks, scoring model, report shape) still hold, but `docs/specs/` is the
+  authoritative behavior contract and this file describes the current architecture
+- [docs/specs/](docs/specs/) — what the system must do, in Given-When-Then scenarios;
+  cite scenarios by `<slug>#S<n>` from tests
+  - `topology-default-route-precondition`, `dns-leak-detection`,
+    `captive-portal-detection`, `reliability-check-resilience`, `risk-scoring`
+- [docs/decisions/](docs/decisions/) — why key architectural and technology choices
+  were made; read before changing a dependency, adding a check, or adding a platform
+  - [2026-08-02-open-source-only.md](docs/decisions/2026-08-02-open-source-only.md) — MIT/Apache/ISC only; why Ookla and fast.com are excluded
   - [2026-08-02-passive-topology.md](docs/decisions/2026-08-02-passive-topology.md) — why no active scanning; what passive ARP gives us
-  - [2026-08-02-technology-stack.md](docs/decisions/2026-08-02-technology-stack.md) — rationale for every runtime dependency vs its alternatives
-  - [2026-08-02-dns-leak-detection.md](docs/decisions/2026-08-02-dns-leak-detection.md) — why DoH, why Cloudflare+Google only, why `uncertain` beats false-negative
-  - [2026-08-24-dns-leak-address-family-matching.md](docs/decisions/2026-08-24-dns-leak-address-family-matching.md) — why only IPv4-vs-IPv4 pairs are comparable; a live dual-stack run broke the original /24-only design
-  - [2026-08-24-cloudflare-speedtest-not-node-compatible.md](docs/decisions/2026-08-24-cloudflare-speedtest-not-node-compatible.md) — why the original speed-test library was dropped for a hand-rolled NDT7 client
-  - [2026-08-24-ookla-permitted-as-fallback.md](docs/decisions/2026-08-24-ookla-permitted-as-fallback.md) — the narrow exception to open-source-only, and why it hasn't been exercised
-  - [2026-08-25-passive-notice-terminal-only-in-json.md](docs/decisions/2026-08-25-passive-notice-terminal-only-in-json.md) — why the passive-ARP notice was dropped from terminal output (proposed, not settled)
-  - [2026-08-25-save-off-by-default.md](docs/decisions/2026-08-25-save-off-by-default.md) — why `--save` is now opt-in; there was never a recorded reason for the old default
-  - [2026-08-25-configurable-speed-duration.md](docs/decisions/2026-08-25-configurable-speed-duration.md) — why `--speed-duration`/`-q`/`--quick` exist, why the 10s default is unchanged, why `-f` was avoided
-- [docs/context/](docs/context/) — observed network behavior and domain background; read when debugging a check that behaves unexpectedly on a specific network
-  - [network-behavior.md](docs/context/network-behavior.md) — live recon findings that shaped the implementation (captive portals, Quad9 blocking, nmcli quirks, VMware interfaces)
-  - [dns-hardening.md](docs/context/dns-hardening.md) — what conncheck's DNS findings mean, how much TLS actually protects against a hostile resolver, how to override DNS globally, and Cloudflare vs Google as a personal choice (not part of conncheck's own leak-detection logic)
+  - [2026-08-02-technology-stack.md](docs/decisions/2026-08-02-technology-stack.md) — original (TS) runtime-dependency rationale
+  - [2026-08-02-dns-leak-detection.md](docs/decisions/2026-08-02-dns-leak-detection.md) — why DoH, why Cloudflare+Google only, why `uncertain` beats a false negative
+  - [2026-08-24-dns-leak-address-family-matching.md](docs/decisions/2026-08-24-dns-leak-address-family-matching.md) — why only IPv4-vs-IPv4 pairs are comparable
+  - [2026-08-24-cloudflare-speedtest-not-node-compatible.md](docs/decisions/2026-08-24-cloudflare-speedtest-not-node-compatible.md) — why the speed test is a hand-rolled NDT7 client
+  - [2026-08-24-ookla-permitted-as-fallback.md](docs/decisions/2026-08-24-ookla-permitted-as-fallback.md) — the narrow exception to open-source-only
+  - [2026-08-25-passive-notice-terminal-only-in-json.md](docs/decisions/2026-08-25-passive-notice-terminal-only-in-json.md) — dropping the passive-ARP notice from terminal output (proposed)
+  - [2026-08-25-save-off-by-default.md](docs/decisions/2026-08-25-save-off-by-default.md) — why `--save` is opt-in
+  - [2026-08-25-configurable-speed-duration.md](docs/decisions/2026-08-25-configurable-speed-duration.md) — why `--speed-duration`/`-q`/`--quick` exist
+  - [2026-08-25-rust-rewrite-technology-stack.md](docs/decisions/2026-08-25-rust-rewrite-technology-stack.md) — every Rust crate vs its alternative and the TS dep it replaces
+  - [2026-08-26-rust-becomes-canonical-implementation.md](docs/decisions/2026-08-26-rust-becomes-canonical-implementation.md) — Rust is canonical; TS moved to `typescript-archive`
+  - [2026-08-26-rename-to-pubnet-tools.md](docs/decisions/2026-08-26-rename-to-pubnet-tools.md) — `conncheck` → `pubnetchk` / crate `pubnet-tools`
+  - [2026-08-27-windows-platform-support.md](docs/decisions/2026-08-27-windows-platform-support.md) — GNU toolchain, PowerShell `Get-Net*` probes, Windows `ping` argument/format differences
+- [docs/context/](docs/context/) — observed network behavior and domain background;
+  read when debugging a check that misbehaves on a specific network
+  - [network-behavior.md](docs/context/network-behavior.md) — live recon findings (captive portals, Quad9 blocking, nmcli quirks, VMware interfaces)
+  - [dns-hardening.md](docs/context/dns-hardening.md) — what the DNS findings mean; how much TLS protects against a hostile resolver
   - [nat-traversal.md](docs/context/nat-traversal.md) — how Tailscale punches through NAT; DERP relay fallback
-  - [tailscale-wireguard-handshake.md](docs/context/tailscale-wireguard-handshake.md) — WireGuard Noise_IKpsk2 handshake walkthrough; cryptographic primitives
+  - [tailscale-wireguard-handshake.md](docs/context/tailscale-wireguard-handshake.md) — WireGuard Noise_IKpsk2 handshake walkthrough
