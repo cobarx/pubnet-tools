@@ -44,3 +44,4 @@ lto = true
 codegen-units = 1
 strip = true
 opt-level = "z"   # optimize for size, not speed - see docs/decisions/2026-08-25-rust-rewrite-technology-stack.md; this whole exercise started as a binary-size question, and every check is dominated by network I/O anyway, not CPU-bound code
+panic = "abort"   # drop stack-unwinding tables (.eh_frame/.gcc_except_table/.eh_frame_hdr, ~480KB / ~14% of the binary) - a CLI that panics just exits, so unwinding buys nothing
