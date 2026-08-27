@@ -12,7 +12,8 @@
 
 use super::{AddrInfo, PlatformProbe, RouteInfo, WifiInfo, is_vpn_iface};
 use crate::network::{PingSummary, lookup_mac_vendor};
-use crate::types::{ArpNeighbor, DnsResolverInfo, DnsSource, InterfaceKind, WifiEncryption};
+use crate::bss::parse_rsn_ie;
+use crate::types::{ArpNeighbor, BssEntry, DnsResolverInfo, DnsSource, InterfaceKind, WifiEncryption};
 use std::net::Ipv4Addr;
 
 use windows_sys::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, HANDLE, NO_ERROR};
@@ -23,8 +24,9 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
     IcmpCreateFile, IcmpSendEcho2, MIB_IPFORWARD_ROW2, MIB_IPNET_TABLE2,
 };
 use windows_sys::Win32::NetworkManagement::WiFi::{
-    DOT11_AUTH_ALGORITHM, WLAN_CONNECTION_ATTRIBUTES, WLAN_INTERFACE_INFO_LIST, WlanCloseHandle,
-    WlanEnumInterfaces, WlanFreeMemory, WlanOpenHandle, WlanQueryInterface,
+    DOT11_AUTH_ALGORITHM, WLAN_BSS_ENTRY, WLAN_BSS_LIST, WLAN_CONNECTION_ATTRIBUTES,
+    WLAN_INTERFACE_INFO_LIST, WlanCloseHandle, WlanEnumInterfaces, WlanFreeMemory,
+    WlanGetNetworkBssList, WlanOpenHandle, WlanQueryInterface, dot11_BSS_type_any,
     wlan_intf_opcode_channel_number, wlan_intf_opcode_current_connection,
 };
 use windows_sys::Win32::Networking::WinSock::{
@@ -66,6 +68,8 @@ const MAX_ADDRS_PER_ADAPTER: usize = 512;
 const MAX_NEIGHBORS: usize = 131_072;
 const MAX_WLAN_INTERFACES: usize = 64;
 const MAX_WIDE_STR_UNITS: usize = 4096;
+const MAX_BSS_ENTRIES: usize = 512;
+const MAX_IE_BYTES: usize = 4096;
 
 // ---------------------------------------------------------------------------
 // Small pure helpers (unit-tested)
@@ -492,6 +496,164 @@ fn wlan_info() -> Option<WifiInfo> {
 }
 
 // ---------------------------------------------------------------------------
+// BSS scan
+// ---------------------------------------------------------------------------
+
+/// `ulChCenterFrequency` (kHz) → 2.4 / 5.0 / 6.0 GHz band label.
+fn freq_khz_to_band(freq_khz: u32) -> Option<f64> {
+    match freq_khz {
+        2_400_000..=2_500_000 => Some(2.4),
+        5_170_000..=5_950_000 => Some(5.0),
+        5_950_001..=7_125_000 => Some(6.0),
+        _ => None,
+    }
+}
+
+/// Convert center-frequency (kHz) to an approximate channel number.
+fn freq_khz_to_channel(freq_khz: u32) -> Option<u32> {
+    let freq_mhz = freq_khz / 1000;
+    match freq_mhz {
+        // 2.4 GHz: ch 1 = 2412 MHz, step 5 MHz
+        2412..=2484 => {
+            if freq_mhz == 2484 {
+                Some(14)
+            } else {
+                Some((freq_mhz - 2412) / 5 + 1)
+            }
+        }
+        // 5 GHz: ch 36 = 5180 MHz, step 5 MHz
+        5180..=5885 => Some((freq_mhz - 5180) / 5 + 36),
+        // 6 GHz: ch 1 = 5955 MHz, step 5 MHz
+        5955..=7115 => Some((freq_mhz - 5955) / 5 + 1),
+        _ => None,
+    }
+}
+
+/// BSSID bytes (6 octets) → `XX:XX:XX:XX:XX:XX` uppercase string.
+fn format_bssid(mac: &[u8; 6]) -> String {
+    mac.iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+/// Blocking BSS list scan. Opens its own WLAN handle so it can be called
+/// independently of `wlan_info`.
+fn wlan_scan_bss() -> Vec<BssEntry> {
+    let mut raw: HANDLE = std::ptr::null_mut();
+    let mut negotiated: u32 = 0;
+    if unsafe { WlanOpenHandle(2, std::ptr::null(), &mut negotiated, &mut raw) } != NO_ERROR {
+        return Vec::new();
+    }
+    let handle = WlanHandle(raw);
+
+    let mut list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
+    if unsafe { WlanEnumInterfaces(handle.0, std::ptr::null(), &mut list) } != NO_ERROR
+        || list.is_null()
+    {
+        return Vec::new();
+    }
+    let list_mem = WlanMem(list as *mut _);
+    let l = unsafe { &*list };
+    let n = (l.dwNumberOfItems as usize).min(MAX_WLAN_INTERFACES);
+    let ifaces = unsafe { std::slice::from_raw_parts(l.InterfaceInfo.as_ptr(), n) };
+    let Some(iface) = ifaces.iter().find(|i| i.isState == 1).or_else(|| ifaces.first()) else {
+        return Vec::new();
+    };
+    let guid = iface.InterfaceGuid;
+
+    // Connected BSSID — for marking `is_connected` on the matching entry.
+    let connected_bssid: Option<[u8; 6]> =
+        wlan_query(handle.0, &guid, wlan_intf_opcode_current_connection).and_then(
+            |(conn_mem, conn_size)| {
+                if (conn_size as usize) < std::mem::size_of::<WLAN_CONNECTION_ATTRIBUTES>() {
+                    return None;
+                }
+                let conn = unsafe { &*(conn_mem.0 as *const WLAN_CONNECTION_ATTRIBUTES) };
+                // Only meaningful when actually associated
+                if conn.isState != 1 {
+                    return None;
+                }
+                Some(conn.wlanAssociationAttributes.dot11Bssid)
+            },
+        );
+
+    drop(list_mem);
+
+    let mut bss_list: *mut WLAN_BSS_LIST = std::ptr::null_mut();
+    let ret = unsafe {
+        WlanGetNetworkBssList(
+            handle.0,
+            &guid,
+            std::ptr::null(),    // all SSIDs
+            dot11_BSS_type_any,
+            0,                   // not security-enabled filter
+            std::ptr::null(),
+            &mut bss_list,
+        )
+    };
+    if ret != NO_ERROR || bss_list.is_null() {
+        return Vec::new();
+    }
+    let bss_mem = WlanMem(bss_list as *mut _);
+
+    let bl = unsafe { &*bss_list };
+    let count = (bl.dwNumberOfItems as usize).min(MAX_BSS_ENTRIES);
+    let entries = unsafe { std::slice::from_raw_parts(bl.wlanBssEntries.as_ptr(), count) };
+
+    let mut results = Vec::with_capacity(count);
+    for entry in entries {
+        let entry: &WLAN_BSS_ENTRY = entry;
+
+        // SSID
+        let ssid_len = (entry.dot11Ssid.uSSIDLength as usize).min(entry.dot11Ssid.ucSSID.len());
+        let ssid = if ssid_len == 0 {
+            None
+        } else {
+            let raw = &entry.dot11Ssid.ucSSID[..ssid_len];
+            // Valid UTF-8 is expected; fall back gracefully for non-UTF-8 networks
+            Some(String::from_utf8_lossy(raw).into_owned())
+        };
+
+        let bssid = format_bssid(&entry.dot11Bssid);
+
+        // Parse RSN IE for auth mode — the IEs follow the WLAN_BSS_ENTRY struct
+        // in the blob at offset uIeOffset, size uIeSize (relative to the entry).
+        let auth_mode = {
+            let ie_offset = entry.ulIeOffset as usize;
+            let ie_size = (entry.ulIeSize as usize).min(MAX_IE_BYTES);
+            // Safety: the pointer arithmetic is bounded by MAX_IE_BYTES and
+            // ie_offset, both clamped; the blob was allocated by WlanGetNetworkBssList
+            // and is alive for the scope of `bss_mem`.
+            let entry_ptr = entry as *const WLAN_BSS_ENTRY as *const u8;
+            let ie_slice = if ie_size > 0 {
+                unsafe { std::slice::from_raw_parts(entry_ptr.add(ie_offset), ie_size) }
+            } else {
+                &[]
+            };
+            parse_rsn_ie(ie_slice)
+        };
+
+        let freq_khz = entry.ulChCenterFrequency;
+        let signal = entry.uLinkQuality.min(100);
+        let is_connected = connected_bssid == Some(entry.dot11Bssid);
+
+        results.push(BssEntry {
+            ssid,
+            bssid,
+            auth_mode,
+            band: freq_khz_to_band(freq_khz),
+            channel: freq_khz_to_channel(freq_khz),
+            signal,
+            is_connected,
+        });
+    }
+
+    drop(bss_mem);
+    results
+}
+
+// ---------------------------------------------------------------------------
 // Probe
 // ---------------------------------------------------------------------------
 
@@ -630,6 +792,12 @@ impl PlatformProbe for WindowsProbe {
             None => classify_if_type(0, iface),
         }
     }
+
+    async fn scan_bss_list(&self) -> Vec<BssEntry> {
+        tokio::task::spawn_blocking(wlan_scan_bss)
+            .await
+            .unwrap_or_default()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -721,5 +889,33 @@ mod tests {
         assert_eq!(valid_ipv4_prefix(32), Some(32));
         assert_eq!(valid_ipv4_prefix(33), None);
         assert_eq!(valid_ipv4_prefix(255), None); // the OS "unknown" sentinel
+    }
+
+    #[test]
+    fn freq_khz_band_classification() {
+        assert_eq!(freq_khz_to_band(2_437_000), Some(2.4)); // ch 6
+        assert_eq!(freq_khz_to_band(5_180_000), Some(5.0)); // ch 36
+        assert_eq!(freq_khz_to_band(6_115_000), Some(6.0)); // 6 GHz
+        assert_eq!(freq_khz_to_band(0), None);
+        assert_eq!(freq_khz_to_band(60_000_000), None); // 60 GHz (not classified)
+    }
+
+    #[test]
+    fn freq_khz_channel_mapping() {
+        assert_eq!(freq_khz_to_channel(2_412_000), Some(1));
+        assert_eq!(freq_khz_to_channel(2_437_000), Some(6));
+        assert_eq!(freq_khz_to_channel(2_484_000), Some(14));
+        assert_eq!(freq_khz_to_channel(5_180_000), Some(36));
+        assert_eq!(freq_khz_to_channel(5_500_000), Some(100));
+        assert_eq!(freq_khz_to_channel(5_955_000), Some(1)); // 6 GHz ch 1
+        assert_eq!(freq_khz_to_channel(0), None);
+    }
+
+    #[test]
+    fn bssid_format_is_colon_separated_uppercase() {
+        assert_eq!(
+            format_bssid(&[0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e]),
+            "00:1A:2B:3C:4D:5E"
+        );
     }
 }

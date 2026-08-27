@@ -4,7 +4,7 @@
 use super::{AddrInfo, PlatformProbe, RouteInfo, WifiInfo, is_vpn_iface};
 use crate::exec::{ExecResult, cmd, exec_cmd};
 use crate::network::lookup_mac_vendor;
-use crate::types::{ArpNeighbor, DnsResolverInfo, DnsSource, InterfaceKind, WifiEncryption};
+use crate::types::{ArpNeighbor, BssEntry, DnsResolverInfo, DnsSource, InterfaceKind, WifiEncryption};
 use regex::Regex;
 use serde::Deserialize;
 use std::sync::LazyLock;
@@ -427,6 +427,10 @@ impl PlatformProbe for MacProbe {
             return InterfaceKind::WiFi;
         }
         InterfaceKind::Ethernet
+    }
+
+    async fn scan_bss_list(&self) -> Vec<BssEntry> {
+        Vec::new()
     }
 }
 

@@ -2,7 +2,7 @@
 //! native commands into common types. Checks call probe methods — they
 //! never invoke platform-specific binaries directly.
 
-use crate::types::{ArpNeighbor, DnsResolverInfo, InterfaceKind, WifiEncryption};
+use crate::types::{ArpNeighbor, BssEntry, DnsResolverInfo, InterfaceKind, WifiEncryption};
 
 #[cfg(target_os = "linux")]
 pub mod linux;
@@ -80,4 +80,8 @@ pub trait PlatformProbe {
 
     /// Whether the interface is WiFi, Ethernet, or something else.
     async fn interface_type(&self, iface: &str) -> InterfaceKind;
+
+    /// Enumerate all visible BSSs (access points) with RSN IE–derived auth
+    /// mode. Returns an empty Vec when WLAN is unavailable or unsupported.
+    async fn scan_bss_list(&self) -> Vec<BssEntry>;
 }

@@ -69,7 +69,7 @@ pub async fn check_topology<P: PlatformProbe>(probe: &P) -> CheckResult<Topology
 mod tests {
     use super::*;
     use crate::platform::{AddrInfo, PlatformProbe, RouteInfo, WifiInfo};
-    use crate::types::{ArpNeighbor, DnsResolverInfo, InterfaceKind};
+    use crate::types::{ArpNeighbor, BssEntry, DnsResolverInfo, InterfaceKind};
 
     struct MockProbe {
         route: Option<RouteInfo>,
@@ -98,6 +98,9 @@ mod tests {
         }
         async fn interface_type(&self, _: &str) -> InterfaceKind {
             InterfaceKind::Ethernet
+        }
+        async fn scan_bss_list(&self) -> Vec<BssEntry> {
+            Vec::new()
         }
     }
 

@@ -67,6 +67,27 @@ impl InterfaceKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AuthMode {
+    Psk,
+    Sae,
+    SaeTransition,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BssEntry {
+    pub ssid: Option<String>,
+    pub bssid: String,
+    pub auth_mode: AuthMode,
+    pub band: Option<f64>,
+    pub channel: Option<u32>,
+    pub signal: u32,
+    pub is_connected: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArpNeighbor {
