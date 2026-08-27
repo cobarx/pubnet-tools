@@ -2,12 +2,18 @@
 template_version: 1.4.0
 date: 2026-08-27
 slug: windows-platform-support
-status: accepted
+status: superseded
 decided_by: hampton
-related: [2026-08-25-rust-rewrite-technology-stack, 2026-08-02-passive-topology]
+related: [2026-08-28-windows-probes-via-win32-api, 2026-08-25-rust-rewrite-technology-stack, 2026-08-02-passive-topology]
 ---
 
 # Decision: Windows support via PowerShell `Get-Net*` cmdlets, on the GNU Rust toolchain
+
+> **Superseded (2026-08-28) by
+> [windows-probes-via-win32-api](2026-08-28-windows-probes-via-win32-api.md)** for the
+> *probe mechanism* only — the Windows probes now call the Win32 API directly instead
+> of shelling out to PowerShell / `netsh` / `ping.exe`. The **GNU-toolchain decision
+> below still stands** and is restated in the successor's first Revisit-if bullet.
 
 ## Context
 
