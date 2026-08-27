@@ -24,6 +24,19 @@ pub async fn save_report(report: &Report, reports_dir: &Path) -> std::io::Result
     Ok(path)
 }
 
+/// Writes the plain-language HTML report to
+/// ~/.pubnetchk/reports/<timestamp>.html and returns the path. Unlike the
+/// JSON report this is always self-contained (inline CSS, no assets), so the
+/// returned path can be handed straight to `xdg-open`.
+pub async fn save_html_report(report: &Report, reports_dir: &Path) -> std::io::Result<PathBuf> {
+    tokio::fs::create_dir_all(reports_dir).await?;
+    let filename = format!("{}.html", report.timestamp.replace(':', "-"));
+    let path = reports_dir.join(filename);
+    let html = crate::output::html::render_html(report);
+    tokio::fs::write(&path, html).await?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,7 +4,7 @@ use crate::checks::speed::{check_speed, default_locate, DEFAULT_TEST_DURATION};
 use crate::checks::topology::check_topology;
 use crate::exec::{cmd, exec_cmd};
 use crate::output::renderer::render_report;
-use crate::output::reporter::{default_reports_dir, save_report};
+use crate::output::reporter::{default_reports_dir, save_html_report, save_report};
 use crate::scoring::{calculate_score, ScorableResult};
 use crate::types::{CheckResult, CheckStatus, PingTargetLabel, Report};
 use clap::{Parser, Subcommand};
@@ -23,6 +23,13 @@ struct Cli {
     /// write the report to ~/.pubnetchk/reports/ (off by default)
     #[arg(long)]
     save: bool,
+    /// write a plain-language HTML report (the "show your family" view) to
+    /// ~/.pubnetchk/reports/ and print its path
+    #[arg(long)]
+    html: bool,
+    /// open the HTML report in your default browser when done (implies --html)
+    #[arg(long)]
+    open: bool,
     /// comma list of checks to run: topology,security,reliability,speed
     #[arg(long)]
     only: Option<String>,
@@ -382,10 +389,42 @@ async fn run_command(cli: &Cli) -> i32 {
         }
     }
 
+    // --open implies --html: opening a report you never generated is
+    // meaningless, so the friendlier reading is "generate it, then open it".
+    if cli.html || cli.open {
+        match save_html_report(&report, &default_reports_dir()).await {
+            Ok(path) => {
+                if !cli.json {
+                    println!("HTML report: {}", path.display());
+                }
+                if cli.open {
+                    open_in_browser(&path).await;
+                }
+            }
+            Err(e) => eprintln!("Failed to save HTML report: {e}"),
+        }
+    }
+
     if cli.strict && matches!(report.score.level, crate::types::RiskLevel::Medium | crate::types::RiskLevel::High) {
         1
     } else {
         0
+    }
+}
+
+/// Hand the report file to the desktop's default handler — `xdg-open` on
+/// Linux, `open` on macOS. Both fork the real application and return quickly,
+/// so this never blocks on the browser staying open. exec_cmd never rejects
+/// on a non-zero exit; only a missing opener binary (ENOENT) surfaces, which
+/// we report without failing the run — the file is already written and its
+/// path was printed.
+async fn open_in_browser(path: &std::path::Path) {
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    let path_str = path.to_string_lossy().into_owned();
+    match exec_cmd(cmd(&[opener, path_str.as_str()])).await {
+        Ok(result) if result.exit_code == Some(0) => {}
+        Ok(result) => eprintln!("Could not open the report ({opener} exited {:?}). Open it yourself: {}", result.exit_code, path.display()),
+        Err(_) => eprintln!("Could not find '{opener}' to open the report. Open it yourself: {}", path.display()),
     }
 }
 
