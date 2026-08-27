@@ -330,11 +330,18 @@ pub async fn check_security<P: PlatformProbe>(
     iface: Option<&str>,
     probe: &P,
     http_client: &reqwest::Client,
+    wifi_detail: bool,
 ) -> CheckResult<SecurityData> {
     let start = Instant::now();
 
     let (wifi, dns, system_egress_ip, cloudflare_probe, google_probe, captive_portal) = tokio::join!(
-        probe.wifi_info(),
+        async {
+            if let Some(iface) = iface {
+                probe.wifi_info(iface, wifi_detail).await
+            } else {
+                None
+            }
+        },
         async {
             if let Some(iface) = iface {
                 probe.dns_info(iface).await
@@ -358,7 +365,7 @@ pub async fn check_security<P: PlatformProbe>(
         .unwrap_or(WifiEncryption::Unknown);
 
     let data = SecurityData {
-        ssid: wifi.as_ref().map(|w| w.ssid.clone()),
+        ssid: wifi.as_ref().and_then(|w| w.ssid.clone()),
         encryption,
         channel: wifi.as_ref().and_then(|w| w.channel),
         frequency_mhz: wifi.as_ref().and_then(|w| w.frequency_mhz),
@@ -378,6 +385,19 @@ pub async fn check_security<P: PlatformProbe>(
     }
 
     let mut findings = wifi_findings(encryption);
+    if wifi.as_ref().is_some_and(|w| w.ssid_hidden) {
+        findings.push(Finding {
+            id: "security.wifi-ssid-hidden".to_string(),
+            severity: Severity::Info,
+            points: 0,
+            title: "Wi-Fi network name (SSID) hidden by the OS".to_string(),
+            detail: Some(
+                "macOS withholds the SSID from command-line tools unless the terminal has \
+                 Location Services access (System Settings ▸ Privacy & Security ▸ Location Services)."
+                    .to_string(),
+            ),
+        });
+    }
     findings.extend(dns_leak_findings(&dns_leak));
     findings.extend(captive_portal_findings(&captive_portal));
 

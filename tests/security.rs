@@ -26,10 +26,22 @@ async fn produces_full_security_data_from_real_probes() {
     let iface = topology.data.map(|d| d.interface);
 
     let client = reqwest::Client::new();
-    let result = check_security(iface.as_deref(), &probe, &client).await;
+    // wifi_detail: true — exercise both the fast and slow Wi-Fi reads.
+    let result = check_security(iface.as_deref(), &probe, &client, true).await;
 
     assert_ne!(result.status, CheckStatus::Failed);
     let data = result.data.expect("expected security data");
+
+    // On Wi-Fi we get an encryption verdict; a redacted SSID (macOS 15+) is
+    // fine, but then the hidden-SSID finding must explain the gap.
+    if data.ssid.is_none() && data.encryption != pubnet_tools::types::WifiEncryption::Unknown {
+        assert!(
+            result
+                .findings
+                .iter()
+                .any(|f| f.id == "security.wifi-ssid-hidden")
+        );
+    }
 
     assert!(matches!(
         data.dns_leak.verdict,

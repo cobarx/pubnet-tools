@@ -1,15 +1,13 @@
 //! macOS implementation of PlatformProbe.
-//! Commands: route, ifconfig, arp, airport, scutil.
+//! Commands: route, ifconfig, arp, scutil, networksetup, ipconfig, system_profiler.
 
 use super::{AddrInfo, PlatformProbe, RouteInfo, WifiInfo, is_vpn_iface};
 use crate::exec::{ExecResult, cmd, exec_cmd};
 use crate::network::lookup_mac_vendor;
 use crate::types::{ArpNeighbor, DnsResolverInfo, DnsSource, InterfaceKind, WifiEncryption};
 use regex::Regex;
+use serde::Deserialize;
 use std::sync::LazyLock;
-
-const AIRPORT: &str =
-    "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport";
 
 fn empty() -> ExecResult {
     ExecResult {
@@ -84,53 +82,186 @@ pub fn parse_arp(raw: &str, iface: &str, gateway_ip: Option<&str>) -> Vec<ArpNei
     neighbors
 }
 
-fn classify_airport_security(link_auth: &str) -> WifiEncryption {
-    match link_auth.trim() {
-        "open" => WifiEncryption::Open,
-        s if s.contains("wpa3") => WifiEncryption::Wpa3,
-        s if s.contains("wpa2") && s.contains("enterprise") => WifiEncryption::Wpa2Enterprise,
-        s if s.contains("wpa2") => WifiEncryption::Wpa2,
-        s if s.contains("wpa") => WifiEncryption::Wpa,
-        _ => WifiEncryption::Unknown,
-    }
-}
-
 fn rssi_to_percent(rssi: i32) -> u32 {
     ((rssi + 100) * 2).clamp(0, 100) as u32
 }
 
-/// Parses `airport -I`.
-pub fn parse_airport(raw: &str) -> Option<WifiInfo> {
-    let mut ssid = None;
-    let mut encryption = WifiEncryption::Unknown;
-    let mut channel: Option<u32> = None;
-    let mut signal_percent: Option<u32> = None;
+const REDACTED: &str = "<redacted>";
+
+/// Classifies a Wi-Fi security label into a `WifiEncryption`. Handles both the
+/// `ipconfig getsummary` form (`WPA2_PSK`, `WPA3_SAE`, `NONE`, `802_1X`, …) and
+/// the `system_profiler` form (`spairport_security_mode_wpa2_personal`,
+/// `…_none`, `…_wpa2_enterprise`, …) — the substring checks cover both.
+fn classify_wifi_security(raw: &str) -> WifiEncryption {
+    let s = raw.to_ascii_lowercase();
+    if s.trim().is_empty() {
+        WifiEncryption::Unknown
+    } else if s.contains("wpa3") {
+        WifiEncryption::Wpa3
+    } else if s.contains("enterprise") || s.contains("802.1x") || s.contains("802_1x") {
+        WifiEncryption::Wpa2Enterprise
+    } else if s.contains("wpa2") {
+        WifiEncryption::Wpa2
+    } else if s.contains("wpa") || s.contains("wep") {
+        WifiEncryption::Wpa
+    } else if s.contains("none") || s.contains("open") {
+        WifiEncryption::Open
+    } else {
+        WifiEncryption::Unknown
+    }
+}
+
+/// Maps a channel number + its band (as printed by `system_profiler`, e.g.
+/// `"48 (5GHz, 80MHz)"`) to a centre frequency in MHz.
+fn channel_band_to_mhz(channel: u32, raw_channel: &str) -> Option<u32> {
+    if raw_channel.contains("6GHz") {
+        Some(5950 + channel * 5)
+    } else if raw_channel.contains("5GHz") {
+        Some(5000 + channel * 5)
+    } else if raw_channel.contains("2GHz") {
+        Some(if channel == 14 {
+            2484
+        } else {
+            2407 + channel * 5
+        })
+    } else {
+        None
+    }
+}
+
+/// The fast Wi-Fi read: `ipconfig getsummary <iface>` → SSID + encryption.
+pub struct IpconfigWifi {
+    /// `None` when the SSID key was `<redacted>`, empty, or absent.
+    pub ssid: Option<String>,
+    pub ssid_hidden: bool,
+    pub encryption: WifiEncryption,
+}
+
+/// Parses `ipconfig getsummary <iface>`. Returns `None` when the interface is
+/// not an associated Wi-Fi link (Ethernet, VPN, or Wi-Fi with no association),
+/// so the caller can treat "not on Wi-Fi" and "parse failed" the same way.
+pub fn parse_ipconfig_getsummary(raw: &str) -> Option<IpconfigWifi> {
+    let mut interface_type: Option<String> = None;
+    let mut link_active = false;
+    let mut ssid: Option<String> = None;
+    let mut security: Option<String> = None;
 
     for line in raw.lines() {
         let Some((key, val)) = line.split_once(':') else {
             continue;
         };
-        match key.trim() {
-            "SSID" => ssid = Some(val.trim().to_string()),
-            "link auth" => encryption = classify_airport_security(val),
-            "agrCtlRSSI" => {
-                if let Ok(rssi) = val.trim().parse::<i32>() {
-                    signal_percent = Some(rssi_to_percent(rssi));
-                }
-            }
-            "channel" => {
-                // Format: "6,1" or just "6"
-                channel = val.trim().split(',').next().and_then(|s| s.parse().ok());
-            }
+        let (key, val) = (key.trim(), val.trim());
+        match key {
+            "InterfaceType" => interface_type = Some(val.to_string()),
+            "LinkStatusActive" => link_active = val.eq_ignore_ascii_case("true"),
+            "SSID" => ssid = Some(val.to_string()),
+            "Security" => security = Some(val.to_string()),
             _ => {}
         }
     }
 
-    Some(WifiInfo {
-        ssid: ssid?,
+    // Only Wi-Fi interfaces carry an SSID/Security. If InterfaceType says
+    // otherwise, or nothing points to an association, this isn't a Wi-Fi link.
+    let is_wifi = interface_type
+        .as_deref()
+        .is_some_and(|t| t.eq_ignore_ascii_case("wifi"));
+    if !is_wifi || !(link_active || security.is_some() || ssid.is_some()) {
+        return None;
+    }
+
+    let visible_ssid = ssid.filter(|s| s.as_str() != REDACTED && !s.is_empty());
+    let encryption = security
+        .filter(|s| !s.is_empty())
+        .map(|s| classify_wifi_security(&s))
+        .unwrap_or(WifiEncryption::Unknown);
+
+    Some(IpconfigWifi {
+        ssid_hidden: visible_ssid.is_none(),
+        ssid: visible_ssid,
         encryption,
+    })
+}
+
+// --- system_profiler -json SPAirPortDataType ---
+
+#[derive(Deserialize)]
+struct SpRoot {
+    #[serde(rename = "SPAirPortDataType", default)]
+    data: Vec<SpData>,
+}
+
+#[derive(Deserialize)]
+struct SpData {
+    #[serde(default)]
+    spairport_airport_interfaces: Vec<SpIface>,
+}
+
+#[derive(Deserialize)]
+struct SpIface {
+    #[serde(rename = "_name", default)]
+    name: String,
+    #[serde(default)]
+    spairport_status_information: String,
+    spairport_current_network_information: Option<SpCurrentNetwork>,
+}
+
+#[derive(Deserialize, Default)]
+struct SpCurrentNetwork {
+    #[serde(rename = "_name", default)]
+    name: String,
+    #[serde(default)]
+    spairport_network_channel: String,
+    #[serde(default)]
+    spairport_security_mode: String,
+    #[serde(default)]
+    spairport_signal_noise: String,
+}
+
+/// The slow Wi-Fi read: `system_profiler -json SPAirPortDataType` → channel,
+/// frequency, signal (and encryption/SSID as a fallback for the fast path).
+pub struct SystemProfilerWifi {
+    pub ssid: Option<String>,
+    pub encryption: WifiEncryption,
+    pub channel: Option<u32>,
+    pub frequency_mhz: Option<u32>,
+    pub signal_percent: Option<u32>,
+}
+
+/// Parses `system_profiler -json SPAirPortDataType` for the connected network
+/// on `iface`. Returns `None` if the JSON doesn't parse or `iface` isn't a
+/// connected Wi-Fi interface in it.
+pub fn parse_system_profiler_wifi(raw: &str, iface: &str) -> Option<SystemProfilerWifi> {
+    let root: SpRoot = serde_json::from_str(raw).ok()?;
+    let current = root
+        .data
+        .iter()
+        .flat_map(|d| &d.spairport_airport_interfaces)
+        .find(|i| i.name == iface && i.spairport_status_information == "spairport_status_connected")
+        .and_then(|i| i.spairport_current_network_information.as_ref())?;
+
+    let channel = current
+        .spairport_network_channel
+        .split_whitespace()
+        .next()
+        .and_then(|s| s.parse::<u32>().ok());
+    let frequency_mhz =
+        channel.and_then(|c| channel_band_to_mhz(c, &current.spairport_network_channel));
+    let signal_percent = current
+        .spairport_signal_noise
+        .split_whitespace()
+        .next()
+        .and_then(|s| s.parse::<i32>().ok())
+        .map(rssi_to_percent);
+    let ssid = match current.name.as_str() {
+        "" | REDACTED => None,
+        s => Some(s.to_string()),
+    };
+
+    Some(SystemProfilerWifi {
+        ssid,
+        encryption: classify_wifi_security(&current.spairport_security_mode),
         channel,
-        frequency_mhz: None,
+        frequency_mhz,
         signal_percent,
     })
 }
@@ -192,10 +323,11 @@ pub fn is_wifi_hardware_port(raw: &str, iface: &str) -> bool {
             let lower = port.trim().to_lowercase();
             current_is_wifi =
                 lower.contains("wi-fi") || lower.contains("airport") || lower.contains("wireless");
-        } else if let Some(dev) = trimmed.strip_prefix("Device:") {
-            if dev.trim() == iface && current_is_wifi {
-                return true;
-            }
+        } else if let Some(dev) = trimmed.strip_prefix("Device:")
+            && dev.trim() == iface
+            && current_is_wifi
+        {
+            return true;
         }
     }
     false
@@ -227,9 +359,51 @@ impl PlatformProbe for MacProbe {
         parse_arp(&r.stdout, iface, gateway_ip)
     }
 
-    async fn wifi_info(&self) -> Option<WifiInfo> {
-        let r = exec_cmd(cmd(&[AIRPORT, "-I"])).await.ok()?;
-        parse_airport(&r.stdout)
+    /// `airport` was removed in macOS 15/26. The fast path
+    /// (`ipconfig getsummary`) gives SSID + encryption instantly; the slow
+    /// path (`system_profiler`, ~7s) adds channel/frequency/signal and only
+    /// runs when `detail` is set. See
+    /// docs/decisions/2026-08-26-macos-wifi-without-airport.md.
+    async fn wifi_info(&self, iface: &str, detail: bool) -> Option<WifiInfo> {
+        let fast = exec_cmd(cmd(&["ipconfig", "getsummary", iface]))
+            .await
+            .ok()
+            .and_then(|r| parse_ipconfig_getsummary(&r.stdout));
+
+        let slow = if detail {
+            exec_cmd(cmd(&["system_profiler", "-json", "SPAirPortDataType"]))
+                .await
+                .ok()
+                .and_then(|r| parse_system_profiler_wifi(&r.stdout, iface))
+        } else {
+            None
+        };
+
+        if fast.is_none() && slow.is_none() {
+            return None;
+        }
+
+        // Fast path owns SSID + encryption; slow path fills channel/signal and
+        // backfills SSID/encryption only where the fast path came up empty.
+        let ssid = fast
+            .as_ref()
+            .and_then(|f| f.ssid.clone())
+            .or_else(|| slow.as_ref().and_then(|s| s.ssid.clone()));
+        let encryption = fast
+            .as_ref()
+            .map(|f| f.encryption)
+            .filter(|e| *e != WifiEncryption::Unknown)
+            .or_else(|| slow.as_ref().map(|s| s.encryption))
+            .unwrap_or(WifiEncryption::Unknown);
+
+        Some(WifiInfo {
+            ssid_hidden: ssid.is_none(),
+            ssid,
+            encryption,
+            channel: slow.as_ref().and_then(|s| s.channel),
+            frequency_mhz: slow.as_ref().and_then(|s| s.frequency_mhz),
+            signal_percent: slow.as_ref().and_then(|s| s.signal_percent),
+        })
     }
 
     async fn dns_info(&self, iface: &str) -> Option<DnsResolverInfo> {
@@ -247,10 +421,10 @@ impl PlatformProbe for MacProbe {
         if is_vpn_iface(iface) {
             return InterfaceKind::Vpn;
         }
-        if let Ok(r) = exec_cmd(cmd(&["networksetup", "-listallhardwareports"])).await {
-            if is_wifi_hardware_port(&r.stdout, iface) {
-                return InterfaceKind::WiFi;
-            }
+        if let Ok(r) = exec_cmd(cmd(&["networksetup", "-listallhardwareports"])).await
+            && is_wifi_hardware_port(&r.stdout, iface)
+        {
+            return InterfaceKind::WiFi;
         }
         InterfaceKind::Ethernet
     }
@@ -360,34 +534,93 @@ mod tests {
         assert!(!neighbors[1].is_gateway);
     }
 
+    // --- Wi-Fi: ipconfig getsummary + system_profiler (airport was removed
+    //     in macOS 15/26). spec: wifi-info-detection ---
+
     #[test]
-    fn parse_airport_extracts_ssid_encryption_channel_signal() {
-        let raw = "     agrCtlRSSI: -60\n          state: running\n      link auth: wpa2-psk\n           SSID: MyNetwork\n        channel: 6,1";
-        let result = parse_airport(raw).unwrap();
-        assert_eq!(result.ssid, "MyNetwork");
-        assert_eq!(result.encryption, WifiEncryption::Wpa2);
-        assert_eq!(result.channel, Some(6));
-        assert_eq!(result.signal_percent, Some(80)); // (-60 + 100) * 2 = 80
+    fn fixture_ipconfig_getsummary_redacted_ssid_home_wifi_macos() {
+        // spec: wifi-info-detection#S2 — macOS withholds the SSID, encryption survives
+        let raw = fixture!("home-wifi-macos", "ipconfig_getsummary_en0.txt");
+        let w = parse_ipconfig_getsummary(raw).unwrap();
+        assert_eq!(w.ssid, None);
+        assert!(w.ssid_hidden);
+        assert_eq!(w.encryption, WifiEncryption::Wpa2);
     }
 
     #[test]
-    fn parse_airport_open_network() {
-        let raw = "      link auth: open\n           SSID: CoffeeShop\n        channel: 1";
-        let result = parse_airport(raw).unwrap();
-        assert_eq!(result.encryption, WifiEncryption::Open);
+    fn fixture_system_profiler_wifi_home_wifi_macos() {
+        // spec: wifi-info-detection#S5 — slow path yields channel + signal
+        let raw = fixture!(
+            "home-wifi-macos",
+            "system_profiler_-json_SPAirPortDataType.json"
+        );
+        let w = parse_system_profiler_wifi(raw, "en0").unwrap();
+        assert_eq!(w.channel, Some(48));
+        assert_eq!(w.frequency_mhz, Some(5240)); // 5000 + 48*5
+        assert!(w.signal_percent.is_some());
+        assert_eq!(w.encryption, WifiEncryption::Wpa2);
+        assert_eq!(w.ssid, None); // <redacted>
     }
 
     #[test]
-    fn parse_airport_wpa3() {
-        let raw = "      link auth: wpa3-sae\n           SSID: SecureNet\n        channel: 36";
-        let result = parse_airport(raw).unwrap();
-        assert_eq!(result.encryption, WifiEncryption::Wpa3);
+    fn system_profiler_wifi_wrong_iface_returns_none() {
+        let raw = fixture!(
+            "home-wifi-macos",
+            "system_profiler_-json_SPAirPortDataType.json"
+        );
+        assert!(parse_system_profiler_wifi(raw, "en7").is_none());
     }
 
     #[test]
-    fn parse_airport_no_ssid_returns_none() {
-        let raw = "      link auth: wpa2-psk\n        channel: 6";
-        assert!(parse_airport(raw).is_none());
+    fn ipconfig_getsummary_ethernet_returns_none() {
+        // spec: wifi-info-detection#S3
+        let raw = "<dictionary> {\n  InterfaceType : Ethernet\n  LinkStatusActive : TRUE\n}";
+        assert!(parse_ipconfig_getsummary(raw).is_none());
+    }
+
+    #[test]
+    fn ipconfig_getsummary_visible_ssid() {
+        // spec: wifi-info-detection#S1
+        let raw = "<dictionary> {\n  InterfaceType : WiFi\n  LinkStatusActive : TRUE\n  SSID : CoffeeShop\n  Security : NONE\n}";
+        let w = parse_ipconfig_getsummary(raw).unwrap();
+        assert_eq!(w.ssid.as_deref(), Some("CoffeeShop"));
+        assert!(!w.ssid_hidden);
+        assert_eq!(w.encryption, WifiEncryption::Open);
+    }
+
+    #[test]
+    fn classify_wifi_security_covers_both_formats() {
+        assert_eq!(classify_wifi_security("WPA2_PSK"), WifiEncryption::Wpa2);
+        assert_eq!(classify_wifi_security("WPA3_SAE"), WifiEncryption::Wpa3);
+        assert_eq!(
+            classify_wifi_security("802_1X"),
+            WifiEncryption::Wpa2Enterprise
+        );
+        assert_eq!(classify_wifi_security("NONE"), WifiEncryption::Open);
+        assert_eq!(
+            classify_wifi_security("spairport_security_mode_wpa2_personal"),
+            WifiEncryption::Wpa2
+        );
+        assert_eq!(
+            classify_wifi_security("spairport_security_mode_wpa3_personal"),
+            WifiEncryption::Wpa3
+        );
+        assert_eq!(
+            classify_wifi_security("spairport_security_mode_wpa2_enterprise"),
+            WifiEncryption::Wpa2Enterprise
+        );
+        assert_eq!(
+            classify_wifi_security("spairport_security_mode_none"),
+            WifiEncryption::Open
+        );
+        assert_eq!(classify_wifi_security(""), WifiEncryption::Unknown);
+    }
+
+    #[test]
+    fn channel_band_to_mhz_by_band() {
+        assert_eq!(channel_band_to_mhz(6, "6 (2GHz, 20MHz)"), Some(2437));
+        assert_eq!(channel_band_to_mhz(48, "48 (5GHz, 80MHz)"), Some(5240));
+        assert_eq!(channel_band_to_mhz(37, "37 (6GHz, 160MHz)"), Some(6135));
     }
 
     #[test]

@@ -1,0 +1,78 @@
+<dictionary> {
+  BSSID : <redacted>
+  ConnectionID : 1
+  IPv4 : <array> {
+    0 : <dictionary> {
+      Addresses : <array> {
+        0 : 192.168.86.247
+      }
+      ChildServiceID : LINKLOCAL-en0
+      ConfigMethod : DHCP
+      DHCP : <dictionary> {
+        LeaseExpirationTime : 08/27/2026 11:22:42
+        LeaseStartTime : 08/26/2026 23:22:42
+        Packet : op = BOOTREPLY
+htype = 1
+flags = 0x0
+hlen = 6
+hops = 0
+xid = 0xc8eeb050
+secs = 0
+ciaddr = 0.0.0.0
+yiaddr = 192.168.86.247
+siaddr = 192.168.86.1
+giaddr = 0.0.0.0
+chaddr = e6:8c:ea:73:f:ea
+sname = 
+file = 
+options:
+Options count is 11
+dhcp_message_type (uint8): ACK 0x5
+server_identifier (ip): 192.168.86.1
+lease_time (uint32): 0xa8c0
+renewal_t1_time_value (uint32): 0x5460
+rebinding_t2_time_value (uint32): 0x93a8
+subnet_mask (ip): 255.255.255.0
+broadcast_address (ip): 192.168.86.255
+router (ip_mult): {192.168.86.1}
+domain_name_server (ip_mult): {192.168.86.1}
+domain_name (string): lan
+end (none): 
+
+        State : BOUND
+      }
+      IsPublished : TRUE
+      Router : 192.168.86.1
+      RouterARPVerified : TRUE
+      ServiceID : DAC47FA9-1BBB-48C9-8098-0A51E9A4FAD6
+      SubnetMasks : <array> {
+        0 : 255.255.255.0
+      }
+    }
+    1 : <dictionary> {
+      ConfigMethod : LinkLocal
+      IsPublished : TRUE
+      ParentServiceID : DAC47FA9-1BBB-48C9-8098-0A51E9A4FAD6
+      ServiceID : LINKLOCAL-en0
+    }
+  }
+  IPv6 : <array> {
+    0 : <dictionary> {
+      ConfigMethod : Automatic
+      DHCPv6 : <dictionary> {
+        Mode : None
+        State : Inactive
+      }
+      IsPublished : TRUE
+      RTADV : <dictionary> {
+        State : Solicit
+      }
+      ServiceID : DAC47FA9-1BBB-48C9-8098-0A51E9A4FAD6
+    }
+  }
+  InterfaceType : WiFi
+  LinkStatusActive : TRUE
+  NetworkID : <redacted>
+  SSID : <redacted>
+  Security : WPA2_PSK
+}

@@ -26,7 +26,8 @@ carry over unchanged.
 Non-root everywhere — nothing in `pubnetchk` requests elevated privileges.
 
 - **Linux:** `ip`, `nmcli` (NetworkManager), `resolvectl`, `ping` (shelled out to)
-- **macOS:** `route`, `ifconfig`, `arp`, `scutil`, `networksetup`, `airport`, `ping` (shelled out to)
+- **macOS:** `route`, `ifconfig`, `arp`, `scutil`, `networksetup`, `ipconfig getsummary`,
+  `system_profiler` (Wi-Fi — `airport` was removed in macOS 15/26), `ping` (shelled out to)
 - **Windows:** the Win32 API directly (IP Helper + WLAN + `IcmpSendEcho2`) via
   `windows-sys` — no child processes, no PowerShell. Build with the GNU toolchain —
   see Development setup.
@@ -53,7 +54,8 @@ pubnet-tools
   └── src/platform/
       ├── mod.rs          PlatformProbe trait + shared types (RouteInfo, AddrInfo, WifiInfo)
       ├── linux.rs        ip / nmcli / resolvectl
-      ├── macos.rs        route / ifconfig / arp / airport / scutil (+ inline parsers)
+      ├── macos.rs        route / ifconfig / arp / scutil / ipconfig getsummary (fast Wi-Fi)
+      │                   / system_profiler -json (slow Wi-Fi: channel+signal) (+ inline parsers)
       └── windows.rs      Win32 API via windows-sys: GetAdaptersAddresses / GetBestRoute2 /
                           GetIpNetTable2 / WLAN API / IcmpSendEcho2 — no shelling out
 ```
@@ -150,7 +152,16 @@ for the toolchain rationale).
   out to `ping` on Linux/macOS; on Windows it sends ICMP echoes via `IcmpSendEcho2`
   (no `ping.exe`, no ~1s floor) — the seam is `system_ping`, `#[cfg]`-split.
 - **Root.** Nothing requires or requests elevated privileges. `iw scan` is excluded for
-  this reason.
+  this reason, and so is macOS `wdutil info` (now sudo-only).
+- **`system_profiler SPAirPortDataType` on the default path.** It takes ~7s (it scans
+  for nearby networks; `-detailLevel mini` doesn't help). It's the macOS *slow* Wi-Fi
+  read — only run when `wifi_detail` is set, which by default tracks the speed check so
+  the cost is hidden. The *fast* read (`ipconfig getsummary`, SSID + encryption) is
+  always safe to run. See
+  [2026-08-26-macos-wifi-without-airport.md](docs/decisions/2026-08-26-macos-wifi-without-airport.md).
+- **Expecting the macOS SSID.** macOS 15+ redacts it for any CLI without a Location
+  Services grant; `wifi_info` returns `ssid: None`, `ssid_hidden: true`, and encryption
+  is still read. Never treat a missing SSID as "not on Wi-Fi".
 - **Proprietary speed-test services, unless no open-source option covers the need.**
   Ookla EULA §14 prohibits automated use; fast.com is Netflix's closed service. See
   [open-source-only](docs/decisions/2026-08-02-open-source-only.md) and the narrow
@@ -173,7 +184,8 @@ for the toolchain rationale).
 - [docs/specs/](docs/specs/) — what the system must do, in Given-When-Then scenarios;
   cite scenarios by `<slug>#S<n>` from tests
   - `topology-default-route-precondition`, `dns-leak-detection`,
-    `captive-portal-detection`, `reliability-check-resilience`, `risk-scoring`
+    `captive-portal-detection`, `reliability-check-resilience`, `risk-scoring`,
+    `wifi-info-detection`
 - [docs/decisions/](docs/decisions/) — why key architectural and technology choices
   were made; read before changing a dependency, adding a check, or adding a platform
   - [2026-08-02-open-source-only.md](docs/decisions/2026-08-02-open-source-only.md) — MIT/Apache/ISC only; why Ookla and fast.com are excluded
@@ -191,6 +203,7 @@ for the toolchain rationale).
   - [2026-08-26-rename-to-pubnet-tools.md](docs/decisions/2026-08-26-rename-to-pubnet-tools.md) — `conncheck` → `pubnetchk` / crate `pubnet-tools`
   - [2026-08-27-windows-platform-support.md](docs/decisions/2026-08-27-windows-platform-support.md) — GNU toolchain (still current); PowerShell probe mechanism (**superseded**)
   - [2026-08-28-windows-probes-via-win32-api.md](docs/decisions/2026-08-28-windows-probes-via-win32-api.md) — Windows probes call the Win32 API directly (`windows-sys`); no PowerShell/netsh/ping.exe; why the fixture corpus was dropped
+  - [2026-08-26-macos-wifi-without-airport.md](docs/decisions/2026-08-26-macos-wifi-without-airport.md) — `airport` was removed in macOS 15/26; fast `ipconfig getsummary` (SSID+encryption) + opt-in slow `system_profiler` (channel+signal); SSID is Location-Services-gated
 - [docs/context/](docs/context/) — observed network behavior and domain background;
   read when debugging a check that misbehaves on a specific network
   - [network-behavior.md](docs/context/network-behavior.md) — live recon findings (captive portals, Quad9 blocking, nmcli quirks, VMware interfaces)

@@ -482,7 +482,8 @@ fn wlan_info() -> Option<WifiInfo> {
         });
 
     Some(WifiInfo {
-        ssid,
+        ssid: Some(ssid),
+        ssid_hidden: false,
         encryption,
         channel,
         frequency_mhz: None,
@@ -595,7 +596,9 @@ impl PlatformProbe for WindowsProbe {
         neighbors
     }
 
-    async fn wifi_info(&self) -> Option<WifiInfo> {
+    /// The WLAN API returns SSID, auth algorithm, signal, and channel in one
+    /// query, so `iface` and `detail` are unused here.
+    async fn wifi_info(&self, _iface: &str, _detail: bool) -> Option<WifiInfo> {
         tokio::task::spawn_blocking(wlan_info).await.ok().flatten()
     }
 

@@ -2,7 +2,9 @@
 //! terminal sections, condensed local/internet loss+latency, WiFi risk
 //! callout.
 
-use crate::types::{DnsLeakVerdict, PingTargetLabel, ReliabilityData, Report, RiskLevel, Severity};
+use crate::types::{
+    DnsLeakVerdict, PingTargetLabel, ReliabilityData, Report, RiskLevel, Severity, WifiEncryption,
+};
 use console::{Style, style};
 
 fn level_style(level: RiskLevel) -> Style {
@@ -114,8 +116,17 @@ fn render_network_section(report: &Report) -> Vec<String> {
     }
 
     if let Some(sec) = sec {
-        if let Some(ssid) = &sec.ssid {
-            lines.push(format!("  SSID: {} — {}", ssid, sec.encryption.as_str()));
+        // "On Wi-Fi" = we read a name, or we read encryption (macOS can give
+        // encryption while withholding the SSID for privacy).
+        let on_wifi = sec.ssid.is_some() || sec.encryption != WifiEncryption::Unknown;
+        if on_wifi {
+            match &sec.ssid {
+                Some(ssid) => lines.push(format!("  SSID: {} — {}", ssid, sec.encryption.as_str())),
+                None => lines.push(format!(
+                    "  SSID: hidden by the OS — {} (macOS: grant your terminal Location Services access)",
+                    sec.encryption.as_str()
+                )),
+            }
             if let Some(channel) = sec.channel {
                 let freq = sec
                     .frequency_mhz
@@ -488,6 +499,22 @@ mod tests {
         assert!(lines[channel_idx].contains('6'));
         assert!(lines[channel_idx].contains("2437"));
         assert!(lines[channel_idx].contains("80%"));
+    }
+
+    #[test]
+    fn network_section_shows_hidden_ssid_with_encryption_and_channel() {
+        // spec: wifi-info-detection#S2 — SSID redacted, encryption + channel still shown
+        let mut report = base_report();
+        let sec = report.security.data.as_mut().unwrap();
+        sec.ssid = None;
+        sec.encryption = WifiEncryption::Wpa2;
+        let output = render_report(&report, false);
+        let lines: Vec<&str> = output.lines().collect();
+        let ssid_idx = lines.iter().position(|l| l.contains("SSID:")).unwrap();
+        assert!(lines[ssid_idx].contains("hidden"));
+        assert!(lines[ssid_idx].contains("WPA2"));
+        let channel_idx = lines.iter().position(|l| l.contains("Channel:")).unwrap();
+        assert_eq!(channel_idx, ssid_idx + 1);
     }
 
     #[test]

@@ -65,6 +65,16 @@ struct Cli {
     /// (not combinable with --speed-duration)
     #[arg(short = 'q', long = "quick")]
     quick: bool,
+    /// read Wi-Fi channel and signal too (macOS: a ~7s `system_profiler`
+    /// call). Default: on when the speed test runs and --quick is off (its
+    /// wall time hides the cost), off otherwise. Not combinable with
+    /// --no-wifi-detail.
+    #[arg(long = "wifi-detail")]
+    wifi_detail: bool,
+    /// skip the Wi-Fi channel/signal read even when the speed test runs
+    /// (SSID and encryption are still read). Not combinable with --wifi-detail.
+    #[arg(long = "no-wifi-detail")]
+    no_wifi_detail: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -203,6 +213,29 @@ fn resolve_speed_duration(seconds: Option<u64>, quick: bool) -> Result<Duration,
     }
 }
 
+/// `--wifi-detail` and `--no-wifi-detail` are two ways to set the same thing,
+/// so combining them is a usage error - same shape as the --only/--no-<check>
+/// and --quick/--speed-duration conflicts. With neither, the slow Wi-Fi read
+/// follows the speed check: on when a full-length speed test runs (its wall
+/// time hides the cost), off under --no-speed / --quick / an --only without
+/// speed. See docs/decisions/2026-08-26-macos-wifi-without-airport.md.
+fn resolve_wifi_detail(
+    wifi_detail: bool,
+    no_wifi_detail: bool,
+    speed_runs_full: bool,
+) -> Result<bool, String> {
+    if wifi_detail && no_wifi_detail {
+        return Err("--wifi-detail cannot be combined with --no-wifi-detail".to_string());
+    }
+    if wifi_detail {
+        return Ok(true);
+    }
+    if no_wifi_detail {
+        return Ok(false);
+    }
+    Ok(speed_runs_full)
+}
+
 fn finish_spinner(spinner: &ProgressBar, status: CheckStatus, text: &str) {
     let symbol = match status {
         CheckStatus::Ok => console::style("✔").green(),
@@ -258,6 +291,7 @@ pub struct RunAuditOptions {
     pub quiet: bool,
     pub exclude_targets: Vec<PingTargetLabel>,
     pub speed_duration: Duration,
+    pub wifi_detail: bool,
 }
 
 pub async fn run_audit(options: RunAuditOptions) -> Report {
@@ -322,7 +356,7 @@ pub async fn run_audit(options: RunAuditOptions) -> Report {
     let (security, reliability, speed) = tokio::join!(
         async {
             if should_run(CheckName::Security) {
-                check_security(iface.as_deref(), &probe, &http_client).await
+                check_security(iface.as_deref(), &probe, &http_client, options.wifi_detail).await
             } else {
                 excluded_result("security")
             }
@@ -434,12 +468,25 @@ async fn run_command(cli: &Cli) -> i32 {
             return 2;
         }
     };
+    let speed_runs_full = !cli.quick
+        && only
+            .as_ref()
+            .is_none_or(|checks| checks.contains(&CheckName::Speed));
+    let wifi_detail =
+        match resolve_wifi_detail(cli.wifi_detail, cli.no_wifi_detail, speed_runs_full) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        };
 
     let report = run_audit(RunAuditOptions {
         only,
         quiet: cli.json,
         exclude_targets,
         speed_duration,
+        wifi_detail,
     })
     .await;
 
@@ -773,5 +820,24 @@ mod tests {
     #[test]
     fn quick_and_explicit_seconds_together_is_a_usage_error() {
         assert!(resolve_speed_duration(Some(5), true).is_err());
+    }
+
+    // --- resolve_wifi_detail ---
+
+    #[test]
+    fn wifi_detail_follows_the_speed_check_by_default() {
+        assert!(resolve_wifi_detail(false, false, true).unwrap());
+        assert!(!resolve_wifi_detail(false, false, false).unwrap());
+    }
+
+    #[test]
+    fn explicit_wifi_detail_flags_override_the_speed_check() {
+        assert!(resolve_wifi_detail(true, false, false).unwrap());
+        assert!(!resolve_wifi_detail(false, true, true).unwrap());
+    }
+
+    #[test]
+    fn both_wifi_detail_flags_together_is_a_usage_error() {
+        assert!(resolve_wifi_detail(true, true, true).is_err());
     }
 }

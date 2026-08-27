@@ -252,19 +252,30 @@ fn render_facts(report: &Report) -> String {
     let mut rows: Vec<(String, String)> = Vec::new();
 
     if let Some(sec) = &report.security.data {
+        let on_wifi = sec.ssid.is_some() || sec.encryption != WifiEncryption::Unknown;
         if let Some(ssid) = &sec.ssid {
             rows.push(("Network name".to_string(), esc(ssid)));
             rows.push((
                 "WiFi protection".to_string(),
                 plain_encryption(sec.encryption).to_string(),
             ));
-        } else if let Some(topo) = &report.topology.data {
-            if topo.interface_kind == InterfaceKind::Ethernet {
-                rows.push((
-                    "Connection".to_string(),
-                    "Wired (Ethernet) cable".to_string(),
-                ));
-            }
+        } else if on_wifi {
+            rows.push((
+                "Network name".to_string(),
+                "Hidden by the OS (grant your terminal Location Services access to show it)"
+                    .to_string(),
+            ));
+            rows.push((
+                "WiFi protection".to_string(),
+                plain_encryption(sec.encryption).to_string(),
+            ));
+        } else if let Some(topo) = &report.topology.data
+            && topo.interface_kind == InterfaceKind::Ethernet
+        {
+            rows.push((
+                "Connection".to_string(),
+                "Wired (Ethernet) cable".to_string(),
+            ));
         }
     }
 

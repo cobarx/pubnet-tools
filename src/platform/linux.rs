@@ -47,7 +47,9 @@ impl PlatformProbe for LinuxProbe {
         parse_ip_neigh(&r.stdout, iface, gateway_ip)
     }
 
-    async fn wifi_info(&self) -> Option<WifiInfo> {
+    /// `nmcli` returns SSID, encryption, channel, and signal in a single
+    /// instant call, so `iface` and `detail` are unused here.
+    async fn wifi_info(&self, _iface: &str, _detail: bool) -> Option<WifiInfo> {
         let r = exec_cmd(cmd(&[
             "nmcli",
             "-t",
@@ -61,7 +63,8 @@ impl PlatformProbe for LinuxProbe {
         .ok()?;
         let w = parse_nmcli_wifi(&r.stdout)?;
         Some(WifiInfo {
-            ssid: w.ssid,
+            ssid: Some(w.ssid),
+            ssid_hidden: false,
             encryption: w.encryption,
             channel: w.channel,
             frequency_mhz: w.frequency_mhz,
