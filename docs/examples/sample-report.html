@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network check</title>
+<style>
+    :root {
+      --bg: #f4f5f7; --card: #ffffff; --ink: #1c2024; --muted: #5b6470;
+      --line: #e2e5ea; --ok: #1f8f4e; --ok-bg: #e7f6ec; --warn: #b9770a;
+      --warn-bg: #fdf3e0; --alert: #c1362c; --alert-bg: #fceceb; --info: #3a6ea5; --info-bg: #eaf1f8;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16181c; --card: #21252b; --ink: #e6e8eb; --muted: #9aa4b0;
+        --line: #313640; --ok: #4cc27a; --ok-bg: #17301f; --warn: #e0a745;
+        --warn-bg: #33280f; --alert: #ef6b60; --alert-bg: #341a18;
+        --info: #7fa9d6; --info-bg: #1a2634;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .wrap { max-width: 680px; margin: 0 auto; padding: 32px 20px 64px; }
+    h1 { font-size: 1.15rem; font-weight: 600; margin: 0 0 4px; }
+    .sub { color: var(--muted); font-size: 0.9rem; margin: 0 0 28px; }
+    .verdict { border-radius: 14px; padding: 24px 24px; margin: 0 0 28px; border: 1px solid var(--line); }
+    .verdict .badge { display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; padding: 3px 10px; border-radius: 999px; margin-bottom: 12px; }
+    .verdict h2 { font-size: 1.5rem; margin: 0 0 6px; line-height: 1.25; }
+    .verdict p { margin: 0; color: var(--muted); font-size: 1rem; }
+    .verdict.ok { background: var(--ok-bg); border-color: var(--ok); }
+    .verdict.ok .badge { background: var(--ok); color: #fff; }
+    .verdict.warn { background: var(--warn-bg); border-color: var(--warn); }
+    .verdict.warn .badge { background: var(--warn); color: #fff; }
+    .verdict.alert { background: var(--alert-bg); border-color: var(--alert); }
+    .verdict.alert .badge { background: var(--alert); color: #fff; }
+    h3.section { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--muted); margin: 32px 0 12px; }
+    table.facts { width: 100%; border-collapse: collapse; background: var(--card);
+      border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    table.facts th, table.facts td { text-align: left; padding: 12px 16px; vertical-align: top;
+      border-top: 1px solid var(--line); }
+    table.facts tr:first-child th, table.facts tr:first-child td { border-top: none; }
+    table.facts th { width: 38%; color: var(--muted); font-weight: 500; }
+    .card { background: var(--card); border: 1px solid var(--line); border-left-width: 4px;
+      border-radius: 10px; padding: 14px 16px; margin: 10px 0; }
+    .card-title { font-weight: 600; margin-bottom: 3px; }
+    .card-body { color: var(--muted); font-size: 0.95rem; }
+    .card.alert { border-left-color: var(--alert); }
+    .card.warn { border-left-color: var(--warn); }
+    .card.ok { border-left-color: var(--ok); }
+    .card.info { border-left-color: var(--info); }
+    details.tech { margin-top: 36px; background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; padding: 4px 18px; }
+    details.tech summary { cursor: pointer; padding: 12px 0; font-weight: 600; color: var(--muted); }
+    details.tech h3 { font-size: 0.9rem; margin: 18px 0 8px; }
+    table.kv { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 0.9rem; }
+    table.kv th, table.kv td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+    table.kv th { color: var(--muted); font-weight: 500; }
+    table.kv.wide th { font-size: 0.8rem; }
+    footer { margin-top: 40px; color: var(--muted); font-size: 0.8rem; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Network check</h1>
+    <p class="sub">A quick, plain-language look at the network you just joined.</p>
+    <div class="verdict alert">
+      <span class="badge">Take care</span>
+      <h2>Be careful on this network</h2>
+      <p>We'd avoid banking, shopping, or signing into important accounts here. Save those for a network you trust.</p>
+    </div>
+    <h3 class="section">At a glance</h3>
+      <table class="facts">
+        <tr><th>Network name</th><td>Airport_Free_WiFi</td></tr>
+        <tr><th>WiFi protection</th><td>No password protection at all</td></tr>
+        <tr><th>Your router</th><td>10.5.12.1 (Ubiquiti)</td></tr>
+        <tr><th>Speed</th><td>38 Mbps down · 12 Mbps up — Fast enough for HD streaming and video calls.</td></tr>
+      </table>
+    <h3 class="section">Things to know</h3>
+      <div class="card alert">
+        <div class="card-title">WiFi is open (unencrypted)</div>
+        <div class="card-body">This WiFi has no password protection at all. Someone nearby on the same network could potentially see which sites you visit. Avoid anything sensitive.</div>
+      </div>
+    <h3 class="section">What's fine</h3>
+      <div class="card ok">
+        <div class="card-title">No DNS leak detected</div>
+        <div class="card-body">The network looks up website addresses honestly — nothing is tampering with them.</div>
+      </div>
+      <div class="card ok">
+        <div class="card-title">No captive portal detected</div>
+        <div class="card-body">No sign-in page stands between you and the internet — you have a direct connection.</div>
+      </div>
+    <details class="tech">
+      <summary>Technical details</summary>
+      <h3>Network</h3>
+      <table class="kv">
+        <tr><th>Interface</th><td>wlan0 (WiFi)</td></tr>
+        <tr><th>Your address</th><td>10.5.12.83/24</td></tr>
+        <tr><th>Gateway</th><td>10.5.12.1</td></tr>
+      </table>
+      <h3>Security</h3>
+      <table class="kv">
+        <tr><th>Encryption</th><td>Open</td></tr>
+        <tr><th>DNS check</th><td>Not intercepted</td></tr>
+        <tr><th>Captive portal</th><td>None</td></tr>
+      </table>
+      <h3>Connection reliability</h3>
+      <table class="kv wide">
+        <tr><th>Target</th><th>Loss</th><th>Avg</th><th>Min</th><th>Max</th><th>Jitter</th></tr>
+        <tr><td>Router</td><td>0%</td><td>3.1 ms</td><td>1.1 ms</td><td>8.1 ms</td><td>2.0 ms</td></tr>
+        <tr><td>Google DNS</td><td>0%</td><td>22.4 ms</td><td>20.4 ms</td><td>27.4 ms</td><td>2.0 ms</td></tr>
+        <tr><td>Cloudflare DNS</td><td>0%</td><td>19.8 ms</td><td>17.8 ms</td><td>24.8 ms</td><td>2.0 ms</td></tr>
+      </table>
+      <h3>Speed</h3>
+      <table class="kv">
+        <tr><th>Download</th><td>38.2 Mbps</td></tr>
+        <tr><th>Upload</th><td>11.7 Mbps</td></tr>
+        <tr><th>Latency</th><td>24.6 ms (jitter 6.1 ms)</td></tr>
+      </table>
+    </details>
+    <footer>Checked August 24, 2026 at 7:30 PM UTC · pubnetchk v0.1.0</footer>
+  </div>
+</body>
+</html>

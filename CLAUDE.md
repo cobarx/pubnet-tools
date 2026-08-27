@@ -35,7 +35,7 @@ Non-root everywhere — nothing in `pubnetchk` requests elevated privileges.
 
 ```
 pubnet-tools
-  ├── src/main.rs         #[tokio::main], calls cli::run() — no logic
+  ├── src/main.rs         captures local UTC offset (pre-runtime), builds the tokio runtime, calls cli::run()
   ├── src/lib.rs          module declarations only
   ├── src/cli.rs          clap setup, orchestrates checks, manages the shared spinner
   ├── src/types.rs        all structs and enums, serde derives, CheckResult<T> — no logic

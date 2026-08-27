@@ -5,7 +5,7 @@ use crate::checks::topology::check_topology;
 #[cfg(not(windows))]
 use crate::exec::{cmd, exec_cmd};
 use crate::output::renderer::render_report;
-use crate::output::reporter::{default_reports_dir, save_report};
+use crate::output::reporter::{default_reports_dir, save_html_report, save_report};
 use crate::scoring::{calculate_score, ScorableResult};
 use crate::types::{CheckResult, CheckStatus, PingTargetLabel, Report};
 use clap::{Parser, Subcommand};
@@ -24,6 +24,13 @@ struct Cli {
     /// write the report to ~/.pubnetchk/reports/ (off by default)
     #[arg(long)]
     save: bool,
+    /// write a plain-language HTML report (the "show your family" view) to
+    /// ~/.pubnetchk/reports/ and print its path
+    #[arg(long)]
+    html: bool,
+    /// open the HTML report in your default browser when done (implies --html)
+    #[arg(long)]
+    open: bool,
     /// comma list of checks to run: topology,security,reliability,speed
     #[arg(long)]
     only: Option<String>,
@@ -385,10 +392,53 @@ async fn run_command(cli: &Cli) -> i32 {
         }
     }
 
+    // --open implies --html: opening a report you never generated is
+    // meaningless, so the friendlier reading is "generate it, then open it".
+    if cli.html || cli.open {
+        match save_html_report(&report, &default_reports_dir()).await {
+            Ok(path) => {
+                if !cli.json {
+                    println!("HTML report: {}", path.display());
+                }
+                if cli.open {
+                    open_in_browser(&path).await;
+                }
+            }
+            Err(e) => eprintln!("Failed to save HTML report: {e}"),
+        }
+    }
+
     if cli.strict && matches!(report.score.level, crate::types::RiskLevel::Medium | crate::types::RiskLevel::High) {
         1
     } else {
         0
+    }
+}
+
+/// Hand the report file to the desktop's default handler — `xdg-open` on
+/// Linux, `open` on macOS, `explorer` on Windows. All three fork the real
+/// application and return quickly, so this never blocks on the browser
+/// staying open. Uses `tokio::process::Command` directly rather than the
+/// `exec` wrapper, since that wrapper isn't in scope on Windows (where the
+/// checks don't shell out). Failure to launch is reported without failing the
+/// run — the file is already written and its path was printed.
+async fn open_in_browser(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(target_os = "windows")]
+    let opener = "explorer";
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let opener = "xdg-open";
+
+    match tokio::process::Command::new(opener).arg(path).status().await {
+        // explorer.exe returns exit code 1 even on success, so on Windows a
+        // launched process is treated as good enough; elsewhere a non-zero
+        // exit is a real failure worth surfacing.
+        Ok(status) if status.success() || cfg!(windows) => {}
+        Ok(status) => {
+            eprintln!("Could not open the report ({opener} exited {status}). Open it yourself: {}", path.display())
+        }
+        Err(_) => eprintln!("Could not find '{opener}' to open the report. Open it yourself: {}", path.display()),
     }
 }
 
