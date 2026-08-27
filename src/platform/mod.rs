@@ -40,7 +40,12 @@ pub struct AddrInfo {
 
 #[derive(Debug, Clone)]
 pub struct WifiInfo {
-    pub ssid: String,
+    /// `None` when the OS joins a network but withholds its name (macOS 15+
+    /// gates the SSID behind Location Services). See `ssid_hidden`.
+    pub ssid: Option<String>,
+    /// True when the interface is on Wi-Fi but the SSID was withheld for
+    /// privacy rather than simply absent. Always `false` off macOS.
+    pub ssid_hidden: bool,
     pub encryption: WifiEncryption,
     pub channel: Option<u32>,
     pub frequency_mhz: Option<u32>,
@@ -58,8 +63,12 @@ pub trait PlatformProbe {
     /// Passive ARP neighbors on the given interface. Never performs active scanning.
     async fn arp_neighbors(&self, iface: &str, gateway_ip: Option<&str>) -> Vec<ArpNeighbor>;
 
-    /// Active WiFi network: SSID, encryption, channel, frequency, signal.
-    async fn wifi_info(&self) -> Option<WifiInfo>;
+    /// Active WiFi network on `iface`: SSID, encryption, and — when `detail`
+    /// is set — channel, frequency, and signal. `detail` exists because on
+    /// macOS the channel/signal source (`system_profiler`) takes several
+    /// seconds; callers pass `false` to skip it. Linux and Windows read
+    /// everything in one call and ignore `detail`.
+    async fn wifi_info(&self, iface: &str, detail: bool) -> Option<WifiInfo>;
 
     /// DNS resolver configuration for the given interface.
     async fn dns_info(&self, iface: &str) -> Option<DnsResolverInfo>;

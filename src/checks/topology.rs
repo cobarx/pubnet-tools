@@ -87,7 +87,7 @@ mod tests {
         async fn arp_neighbors(&self, _: &str, _: Option<&str>) -> Vec<ArpNeighbor> {
             self.neighbors.clone()
         }
-        async fn wifi_info(&self) -> Option<WifiInfo> {
+        async fn wifi_info(&self, _: &str, _: bool) -> Option<WifiInfo> {
             None
         }
         async fn dns_info(&self, _: &str) -> Option<DnsResolverInfo> {

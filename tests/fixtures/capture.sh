@@ -39,10 +39,14 @@ if [[ "$OS" == "Darwin" ]]; then
     run "scutil_--dns"                          scutil --dns
     run "networksetup_-listallhardwareports"    networksetup -listallhardwareports
 
-    AIRPORT="/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
-    if [[ -x "$AIRPORT" ]]; then
-        run "airport_-I"                        "$AIRPORT" -I
-    fi
+    # Wi-Fi: `airport` was removed in macOS 15/26. `ipconfig getsummary` is the
+    # fast path (SSID + Security, instant); `system_profiler` is the slow path
+    # (~7s) that also carries channel and signal. See
+    # docs/decisions/2026-08-26-macos-wifi-without-airport.md.
+    # SSID/BSSID read `<redacted>` unless this terminal has a Location Services
+    # grant — see tests/fixtures/NEEDED.md (`ssid-visible-macos`).
+    run "ipconfig_getsummary_${IFACE}"          ipconfig getsummary "$IFACE"
+    run "system_profiler_-json_SPAirPortDataType" system_profiler -json SPAirPortDataType
 
 elif [[ "$OS" == "Linux" ]]; then
     echo "Capturing Linux fixtures..."
