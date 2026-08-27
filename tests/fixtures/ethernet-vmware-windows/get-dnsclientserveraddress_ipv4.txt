@@ -1,0 +1,12 @@
+
+
+InterfaceAlias  : Ethernet0
+InterfaceIndex  : 11
+ServerAddresses : {172.16.228.2}
+
+InterfaceAlias  : Loopback Pseudo-Interface 1
+InterfaceIndex  : 1
+ServerAddresses : {}
+
+
+

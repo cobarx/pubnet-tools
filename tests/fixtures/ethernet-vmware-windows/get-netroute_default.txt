@@ -1,0 +1,9 @@
+
+
+NextHop        : 172.16.228.2
+InterfaceAlias : Ethernet0
+InterfaceIndex : 11
+RouteMetric    : 0
+
+
+

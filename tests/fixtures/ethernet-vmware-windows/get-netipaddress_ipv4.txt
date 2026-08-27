@@ -1,0 +1,12 @@
+
+
+IPAddress      : 172.16.228.128
+InterfaceAlias : Ethernet0
+PrefixLength   : 24
+
+IPAddress      : 127.0.0.1
+InterfaceAlias : Loopback Pseudo-Interface 1
+PrefixLength   : 8
+
+
+
