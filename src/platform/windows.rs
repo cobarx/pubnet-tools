@@ -1,236 +1,378 @@
-//! Windows implementation of PlatformProbe.
-//! Every probe shells out to PowerShell's `Get-Net*` / `Get-DnsClient*`
-//! cmdlets rendered with `Format-List`. Their property names are English
-//! regardless of the Windows display language, so the "Key : Value" text is
-//! a stable parse target — `ipconfig` / `route print` localize and aren't.
-//! WiFi is the one exception: `netsh wlan show interfaces` has no structured
-//! equivalent, and its labels *do* localize (see `parse_netsh_wlan`).
+//! Windows implementation of PlatformProbe — calls the Win32 API directly
+//! (IP Helper + WLAN + ICMP) rather than shelling out to PowerShell / netsh /
+//! ping.exe. See docs/decisions/2026-08-28-windows-probes-via-win32-api.md.
+//!
+//! The API surface is language-invariant and structured (auth algorithm is an
+//! enum, not a localized label), so there is no captured command output to
+//! parse or to sanitize. Coverage that the pointer-walking is correct comes
+//! from the contract tests run on a real Windows machine; the unit tests here
+//! cover the pure enum/byte mappings.
+
+#![allow(non_upper_case_globals)]
 
 use super::{is_vpn_iface, AddrInfo, PlatformProbe, RouteInfo, WifiInfo};
-use crate::exec::{cmd, exec_cmd, ExecResult};
-use crate::network::lookup_mac_vendor;
+use crate::network::{lookup_mac_vendor, PingSummary};
 use crate::types::{ArpNeighbor, DnsResolverInfo, DnsSource, InterfaceKind, WifiEncryption};
+use std::net::Ipv4Addr;
 
-fn empty() -> ExecResult {
-    ExecResult { stdout: String::new(), stderr: String::new(), exit_code: None }
+use windows_sys::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, HANDLE, NO_ERROR};
+use windows_sys::Win32::NetworkManagement::IpHelper::{
+    FreeMibTable, GetAdaptersAddresses, GetBestRoute2, GetIpNetTable2, IcmpCloseHandle,
+    IcmpCreateFile, IcmpSendEcho2, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_MULTICAST,
+    ICMP_ECHO_REPLY, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211,
+    IF_TYPE_PPP, IF_TYPE_TUNNEL, IP_ADAPTER_ADDRESSES_LH, IP_SUCCESS, MIB_IPFORWARD_ROW2,
+    MIB_IPNET_TABLE2,
+};
+use windows_sys::Win32::NetworkManagement::WiFi::{
+    wlan_intf_opcode_channel_number, wlan_intf_opcode_current_connection, WlanCloseHandle,
+    WlanEnumInterfaces, WlanFreeMemory, WlanOpenHandle, WlanQueryInterface, DOT11_AUTH_ALGORITHM,
+    WLAN_CONNECTION_ATTRIBUTES, WLAN_INTERFACE_INFO_LIST,
+};
+use windows_sys::Win32::Networking::WinSock::{
+    AF_INET, IN_ADDR, IN_ADDR_0, SOCKADDR, SOCKADDR_IN, SOCKADDR_INET,
+};
+
+/// `IcmpCreateFile` failure sentinel.
+const INVALID_HANDLE_VALUE: HANDLE = -1isize as HANDLE;
+
+// ---------------------------------------------------------------------------
+// Small pure helpers (unit-tested)
+// ---------------------------------------------------------------------------
+
+/// First octet's group bit (multicast) or an all-ones broadcast address.
+fn is_group_or_broadcast(mac: &[u8]) -> bool {
+    match mac.first() {
+        None => true,
+        Some(first) => first & 1 != 0 || mac.iter().all(|b| *b == 0xff),
+    }
 }
 
-/// Wraps a PowerShell one-liner as an argv for `exec_cmd` (no shell, no
-/// injection surface — the command string is a single fixed argument).
-fn powershell(command: &str) -> Vec<String> {
-    cmd(&["powershell", "-NoProfile", "-NonInteractive", "-Command", command])
+/// `AA-BB-CC-DD-EE-FF`, uppercase, matching what `lookup_mac_vendor` and the
+/// macOS/Linux probes produce.
+fn format_mac(mac: &[u8]) -> Option<String> {
+    if mac.is_empty() {
+        return None;
+    }
+    Some(mac.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join("-"))
+}
+
+/// `dot11AuthAlgorithm` (from `WLAN_SECURITY_ATTRIBUTES`) → our bucket.
+/// Values per the DOT11_AUTH_ALGO_* constants.
+fn classify_dot11_auth(algo: DOT11_AUTH_ALGORITHM) -> WifiEncryption {
+    match algo {
+        1 => WifiEncryption::Open,           // 80211_OPEN
+        2..=5 => WifiEncryption::Wpa,        // SHARED_KEY (WEP-era) / WPA / WPA_PSK / WPA_NONE
+        6 => WifiEncryption::Wpa2Enterprise, // RSNA (802.1X)
+        7 => WifiEncryption::Wpa2,           // RSNA_PSK
+        8..=11 => WifiEncryption::Wpa3,      // WPA3 / SAE / OWE / WPA3_ENT
+        _ => WifiEncryption::Unknown,
+    }
+}
+
+/// `IfType` (from `IP_ADAPTER_ADDRESSES`) → our interface kind.
+fn classify_if_type(if_type: u32, iface: &str) -> InterfaceKind {
+    if is_vpn_iface(iface) {
+        return InterfaceKind::Vpn;
+    }
+    match if_type {
+        IF_TYPE_IEEE80211 => InterfaceKind::WiFi,
+        IF_TYPE_ETHERNET_CSMACD => InterfaceKind::Ethernet,
+        IF_TYPE_TUNNEL | IF_TYPE_PPP => InterfaceKind::Vpn,
+        _ => InterfaceKind::Other,
+    }
+}
+
+/// `NL_NEIGHBOR_STATE` (i32) → the short label the report shows.
+fn neighbor_state_str(state: i32) -> &'static str {
+    match state {
+        0 => "Unreachable",
+        1 => "Incomplete",
+        2 => "Probe",
+        3 => "Delay",
+        4 => "Stale",
+        5 => "Reachable",
+        6 => "Permanent",
+        _ => "Unknown",
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Format-List parsing
+// FFI value helpers
 // ---------------------------------------------------------------------------
 
-/// One `Format-List` record: the `Key : Value` lines between blank lines,
-/// keyed by trimmed key. PowerShell pads keys to a common width and emits
-/// leading/trailing blank lines; both are tolerated here.
-type FlRecord = Vec<(String, String)>;
+/// Reads a NUL-terminated wide (UTF-16) string.
+unsafe fn wide_ptr_to_string(mut p: *const u16) -> String {
+    if p.is_null() {
+        return String::new();
+    }
+    let mut units = Vec::new();
+    while unsafe { *p } != 0 {
+        units.push(unsafe { *p });
+        p = unsafe { p.add(1) };
+    }
+    String::from_utf16_lossy(&units)
+}
 
-fn parse_format_list(raw: &str) -> Vec<FlRecord> {
-    let mut records = Vec::new();
-    let mut current: FlRecord = Vec::new();
-    for line in raw.lines() {
-        let line = line.trim_end_matches('\r');
-        if line.trim().is_empty() {
-            if !current.is_empty() {
-                records.push(std::mem::take(&mut current));
-            }
-            continue;
+/// IPv4 out of a raw `SOCKADDR*` (from a `SOCKET_ADDRESS`), if it is AF_INET.
+unsafe fn sockaddr_ptr_ipv4(sa: *const SOCKADDR) -> Option<Ipv4Addr> {
+    if sa.is_null() || unsafe { (*sa).sa_family } != AF_INET {
+        return None;
+    }
+    let v4 = sa as *const SOCKADDR_IN;
+    let bytes = unsafe { (*v4).sin_addr.S_un.S_addr }.to_ne_bytes();
+    Some(Ipv4Addr::from(bytes))
+}
+
+/// IPv4 out of a `SOCKADDR_INET` union, if it is AF_INET.
+unsafe fn sockaddr_inet_ipv4(sa: &SOCKADDR_INET) -> Option<Ipv4Addr> {
+    if unsafe { sa.si_family } != AF_INET {
+        return None;
+    }
+    let bytes = unsafe { sa.Ipv4.sin_addr.S_un.S_addr }.to_ne_bytes();
+    Some(Ipv4Addr::from(bytes))
+}
+
+fn ipv4_sockaddr_inet(ip: Ipv4Addr) -> SOCKADDR_INET {
+    let mut sa: SOCKADDR_INET = unsafe { std::mem::zeroed() };
+    sa.Ipv4 = SOCKADDR_IN {
+        sin_family: AF_INET,
+        sin_port: 0,
+        sin_addr: IN_ADDR { S_un: IN_ADDR_0 { S_addr: u32::from_ne_bytes(ip.octets()) } },
+        sin_zero: [0; 8],
+    };
+    sa
+}
+
+// ---------------------------------------------------------------------------
+// GetAdaptersAddresses snapshot
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct AdapterInfo {
+    luid: u64,
+    friendly_name: String,
+    if_type: u32,
+    ipv4: Vec<(Ipv4Addr, u8)>,
+    dns_servers: Vec<Ipv4Addr>,
+}
+
+/// One `GetAdaptersAddresses` call → owned Rust structs (no live pointers).
+fn list_adapters() -> Vec<AdapterInfo> {
+    let flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST;
+    let mut size: u32 = 16 * 1024;
+    let mut buf: Vec<u64> = Vec::new();
+
+    // Grow-and-retry: the first call sizes the buffer.
+    for _ in 0..4 {
+        buf = vec![0u64; (size as usize).div_ceil(8)];
+        let ret = unsafe {
+            GetAdaptersAddresses(
+                AF_INET as u32,
+                flags,
+                std::ptr::null(),
+                buf.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH,
+                &mut size,
+            )
+        };
+        if ret == NO_ERROR {
+            break;
         }
-        // Split on the first ':' — values (IPv6, "{a, b}") may contain more.
-        if let Some((key, value)) = line.split_once(':') {
-            current.push((key.trim().to_string(), value.trim().to_string()));
-        } else {
-            // A continuation line (wrapped value). Append to the last value.
-            if let Some(last) = current.last_mut() {
-                last.1.push(' ');
-                last.1.push_str(line.trim());
+        if ret != ERROR_BUFFER_OVERFLOW {
+            return Vec::new();
+        }
+    }
+
+    let mut adapters = Vec::new();
+    let mut cur = buf.as_ptr() as *const IP_ADAPTER_ADDRESSES_LH;
+    while !cur.is_null() {
+        let a = unsafe { &*cur };
+
+        let mut ipv4 = Vec::new();
+        let mut uni = a.FirstUnicastAddress;
+        while !uni.is_null() {
+            let u = unsafe { &*uni };
+            if let Some(ip) = unsafe { sockaddr_ptr_ipv4(u.Address.lpSockaddr) } {
+                ipv4.push((ip, u.OnLinkPrefixLength));
+            }
+            uni = u.Next;
+        }
+
+        let mut dns_servers = Vec::new();
+        let mut dns = a.FirstDnsServerAddress;
+        while !dns.is_null() {
+            let d = unsafe { &*dns };
+            if let Some(ip) = unsafe { sockaddr_ptr_ipv4(d.Address.lpSockaddr) } {
+                dns_servers.push(ip);
+            }
+            dns = d.Next;
+        }
+
+        adapters.push(AdapterInfo {
+            luid: unsafe { a.Luid.Value },
+            friendly_name: unsafe { wide_ptr_to_string(a.FriendlyName) },
+            if_type: a.IfType,
+            ipv4,
+            dns_servers,
+        });
+
+        cur = a.Next;
+    }
+    adapters
+}
+
+fn adapter_by_name<'a>(adapters: &'a [AdapterInfo], name: &str) -> Option<&'a AdapterInfo> {
+    adapters.iter().find(|a| a.friendly_name == name)
+}
+
+// ---------------------------------------------------------------------------
+// ICMP ping (used by checks::reliability on Windows)
+// ---------------------------------------------------------------------------
+
+fn icmp_ping_blocking(ip: Ipv4Addr, count: u32) -> PingSummary {
+    let all_fail = PingSummary { transmitted: count, received: 0, rtts: Vec::new() };
+
+    let handle = unsafe { IcmpCreateFile() };
+    if handle == INVALID_HANDLE_VALUE || handle.is_null() {
+        return all_fail;
+    }
+
+    let dest: u32 = u32::from_ne_bytes(ip.octets());
+    let request = [0x61u8; 32]; // arbitrary payload
+    // ICMP_ECHO_REPLY + payload + 8 bytes for an optional ICMP error record.
+    let mut reply = [0u8; std::mem::size_of::<ICMP_ECHO_REPLY>() + 32 + 8];
+
+    let mut rtts = Vec::new();
+    for i in 0..count {
+        if i > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        let n = unsafe {
+            IcmpSendEcho2(
+                handle,
+                std::ptr::null_mut(),
+                None,
+                std::ptr::null(),
+                dest,
+                request.as_ptr() as *const _,
+                request.len() as u16,
+                std::ptr::null(),
+                reply.as_mut_ptr() as *mut _,
+                reply.len() as u32,
+                2000,
+            )
+        };
+        if n >= 1 {
+            let r = unsafe { &*(reply.as_ptr() as *const ICMP_ECHO_REPLY) };
+            if r.Status == IP_SUCCESS {
+                rtts.push(r.RoundTripTime as f64);
             }
         }
     }
-    if !current.is_empty() {
-        records.push(current);
+
+    unsafe { IcmpCloseHandle(handle) };
+    PingSummary { transmitted: count, received: rtts.len() as u32, rtts }
+}
+
+/// Ping `host` `count` times over ICMP. Runs on the blocking pool — each echo
+/// is a synchronous `IcmpSendEcho2`.
+pub async fn icmp_ping(host: &str, count: u32) -> PingSummary {
+    let Ok(ip) = host.parse::<Ipv4Addr>() else {
+        return PingSummary { transmitted: count, received: 0, rtts: Vec::new() };
+    };
+    tokio::task::spawn_blocking(move || icmp_ping_blocking(ip, count))
+        .await
+        .unwrap_or(PingSummary { transmitted: count, received: 0, rtts: Vec::new() })
+}
+
+// ---------------------------------------------------------------------------
+// WLAN
+// ---------------------------------------------------------------------------
+
+fn wlan_info() -> Option<WifiInfo> {
+    let mut handle: HANDLE = std::ptr::null_mut();
+    let mut negotiated: u32 = 0;
+    if unsafe { WlanOpenHandle(2, std::ptr::null(), &mut negotiated, &mut handle) } != NO_ERROR {
+        return None; // wlansvc not running, or no WLAN stack
     }
-    records
-}
 
-fn field<'a>(record: &'a FlRecord, key: &str) -> Option<&'a str> {
-    record.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
-}
-
-// ---------------------------------------------------------------------------
-// Parsers
-// ---------------------------------------------------------------------------
-
-/// Parses `Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Format-List`.
-/// Takes the lowest-metric record when several default routes exist.
-pub fn parse_get_netroute(raw: &str) -> Option<RouteInfo> {
-    parse_format_list(raw)
-        .into_iter()
-        .filter_map(|r| {
-            let gateway = field(&r, "NextHop")?.to_string();
-            let device = field(&r, "InterfaceAlias")?.to_string();
-            let metric = field(&r, "RouteMetric").and_then(|m| m.parse::<i64>().ok()).unwrap_or(i64::MAX);
-            // 0.0.0.0 NextHop means "on-link" — not a usable gateway.
-            if gateway == "0.0.0.0" {
+    let result = (|| {
+        let mut list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
+        if unsafe { WlanEnumInterfaces(handle, std::ptr::null(), &mut list) } != NO_ERROR
+            || list.is_null()
+        {
+            return None;
+        }
+        let l = unsafe { &*list };
+        let ifaces =
+            unsafe { std::slice::from_raw_parts(l.InterfaceInfo.as_ptr(), l.dwNumberOfItems as usize) };
+        // Prefer a connected interface; fall back to the first.
+        let chosen = ifaces.iter().find(|i| i.isState == 1).or_else(|| ifaces.first());
+        let guid = match chosen {
+            Some(i) => i.InterfaceGuid,
+            None => {
+                unsafe { WlanFreeMemory(list as *const _) };
                 return None;
             }
-            Some((metric, RouteInfo { gateway, device }))
-        })
-        .min_by_key(|(metric, _)| *metric)
-        .map(|(_, route)| route)
-}
+        };
+        unsafe { WlanFreeMemory(list as *const _) };
 
-/// Parses `Get-NetIPAddress -AddressFamily IPv4 | Format-List` for the
-/// address on the given interface.
-pub fn parse_get_netipaddress(raw: &str, iface: &str) -> Option<AddrInfo> {
-    parse_format_list(raw).into_iter().find_map(|r| {
-        if field(&r, "InterfaceAlias") != Some(iface) {
+        // current_connection → SSID, auth algorithm, signal quality
+        let mut size: u32 = 0;
+        let mut data: *mut std::ffi::c_void = std::ptr::null_mut();
+        if unsafe {
+            WlanQueryInterface(
+                handle,
+                &guid,
+                wlan_intf_opcode_current_connection,
+                std::ptr::null(),
+                &mut size,
+                &mut data,
+                std::ptr::null_mut(),
+            )
+        } != NO_ERROR
+            || data.is_null()
+        {
             return None;
         }
-        let ip = field(&r, "IPAddress")?.to_string();
-        let prefix = field(&r, "PrefixLength")?.parse().ok()?;
-        Some(AddrInfo { ip, prefix })
-    })
-}
+        let conn = unsafe { &*(data as *const WLAN_CONNECTION_ATTRIBUTES) };
+        let assoc = &conn.wlanAssociationAttributes;
+        let ssid_bytes = &assoc.dot11Ssid.ucSSID[..(assoc.dot11Ssid.uSSIDLength as usize).min(32)];
+        let ssid = String::from_utf8_lossy(ssid_bytes).into_owned();
+        let signal_percent = Some(assoc.wlanSignalQuality.min(100));
+        let encryption = classify_dot11_auth(conn.wlanSecurityAttributes.dot11AuthAlgorithm);
+        unsafe { WlanFreeMemory(data as *const _) };
 
-/// Parses `Get-NetNeighbor -AddressFamily IPv4 | Format-List`. Filters the
-/// same way the macOS `arp` parser does: broadcast and multicast MACs
-/// dropped, incomplete entries (no MAC) dropped.
-pub fn parse_get_netneighbor(raw: &str, iface: &str, gateway_ip: Option<&str>) -> Vec<ArpNeighbor> {
-    let mut neighbors = Vec::new();
-    for r in parse_format_list(raw) {
-        if field(&r, "InterfaceAlias") != Some(iface) {
-            continue;
-        }
-        let Some(ip) = field(&r, "IPAddress") else { continue };
-        let mac_raw = field(&r, "LinkLayerAddress").unwrap_or("");
-        if mac_raw.is_empty() {
-            continue;
-        }
-        // Multicast/group bit in the first octet, or broadcast.
-        let first_byte =
-            u8::from_str_radix(mac_raw.split(['-', ':']).next().unwrap_or("0"), 16).unwrap_or(0);
-        if first_byte & 1 != 0 {
-            continue;
-        }
-        let mac = Some(mac_raw.to_string());
-        let state = field(&r, "State").unwrap_or("Unknown").to_string();
-        let is_gateway = gateway_ip.is_some_and(|g| g == ip);
-        neighbors.push(ArpNeighbor {
-            ip: ip.to_string(),
-            vendor: lookup_mac_vendor(mac.as_deref()),
-            mac,
-            state,
-            device: iface.to_string(),
-            is_gateway,
-        });
-    }
-    neighbors
-}
-
-/// Parses `Get-DnsClientServerAddress -AddressFamily IPv4 | Format-List`.
-/// `ServerAddresses` renders as `{192.168.1.1, 8.8.8.8}` (or `{}` when unset).
-pub fn parse_get_dnsclientserveraddress(raw: &str, iface: &str) -> Option<DnsResolverInfo> {
-    parse_format_list(raw).into_iter().find_map(|r| {
-        if field(&r, "InterfaceAlias") != Some(iface) {
-            return None;
-        }
-        let servers: Vec<String> = field(&r, "ServerAddresses")?
-            .trim_matches(['{', '}'])
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect();
-        if servers.is_empty() {
-            return None;
-        }
-        Some(DnsResolverInfo {
-            link: iface.to_string(),
-            current_server: servers.first().cloned(),
-            servers,
-            source: DnsSource::ResolvConf,
-        })
-    })
-}
-
-/// Classifies `Get-NetAdapter | Format-List`'s `PhysicalMediaType` for the
-/// given interface. "Native 802.11" is WiFi; "802.3" is Ethernet; anything
-/// else (Bluetooth PAN, WWAN, virtual) is Other.
-pub fn parse_get_netadapter_kind(raw: &str, iface: &str) -> Option<InterfaceKind> {
-    parse_format_list(raw).into_iter().find_map(|r| {
-        if field(&r, "Name") != Some(iface) {
-            return None;
-        }
-        let media = field(&r, "PhysicalMediaType").unwrap_or("");
-        Some(if media.contains("802.11") {
-            InterfaceKind::WiFi
-        } else if media.contains("802.3") {
-            InterfaceKind::Ethernet
+        // channel_number (a separate query; may be absent on some drivers)
+        let mut csize: u32 = 0;
+        let mut cdata: *mut std::ffi::c_void = std::ptr::null_mut();
+        let channel = if unsafe {
+            WlanQueryInterface(
+                handle,
+                &guid,
+                wlan_intf_opcode_channel_number,
+                std::ptr::null(),
+                &mut csize,
+                &mut cdata,
+                std::ptr::null_mut(),
+            )
+        } == NO_ERROR
+            && !cdata.is_null()
+        {
+            let ch = unsafe { *(cdata as *const u32) };
+            unsafe { WlanFreeMemory(cdata as *const _) };
+            (ch != 0).then_some(ch)
         } else {
-            InterfaceKind::Other
-        })
-    })
-}
+            None
+        };
 
-fn classify_netsh_auth(auth: &str) -> WifiEncryption {
-    let a = auth.to_lowercase();
-    if a.contains("open") || a.is_empty() {
-        WifiEncryption::Open
-    } else if a.contains("wpa3") {
-        WifiEncryption::Wpa3
-    } else if a.contains("wpa2") && a.contains("enterprise") {
-        WifiEncryption::Wpa2Enterprise
-    } else if a.contains("wpa2") {
-        WifiEncryption::Wpa2
-    } else if a.contains("wpa") {
-        WifiEncryption::Wpa
-    } else {
-        WifiEncryption::Unknown
-    }
-}
-
-/// Parses `netsh wlan show interfaces`. Unlike the `Get-Net*` cmdlets this
-/// output localizes — the labels ("SSID", "Authentication", "Channel",
-/// "Signal") are English only on an English-language Windows. A non-English
-/// system falls through to `None`, which the security check already treats
-/// as "no WiFi info", the same as an Ethernet connection.
-///
-/// NOTE: no real connected-WiFi capture exists yet — see
-/// `tests/fixtures/NEEDED.md`. This parser is written against the documented
-/// format and the fixture that *is* captured (wlansvc stopped -> no match).
-pub fn parse_netsh_wlan(raw: &str) -> Option<WifiInfo> {
-    let mut ssid = None;
-    let mut encryption = WifiEncryption::Unknown;
-    let mut channel = None;
-    let mut signal_percent = None;
-
-    for line in raw.lines() {
-        let Some((key, value)) = line.split_once(':') else { continue };
-        let key = key.trim();
-        let value = value.trim();
-        match key {
-            // "SSID" but not "BSSID"; exact match avoids the collision.
-            "SSID" => ssid = Some(value.to_string()),
-            "Authentication" => encryption = classify_netsh_auth(value),
-            "Channel" => channel = value.parse().ok(),
-            "Signal" => signal_percent = value.trim_end_matches('%').parse().ok(),
-            _ => {}
+        if ssid.is_empty() {
+            return None;
         }
-    }
+        Some(WifiInfo { ssid, encryption, channel, frequency_mhz: None, signal_percent })
+    })();
 
-    Some(WifiInfo {
-        ssid: ssid?,
-        encryption,
-        channel,
-        frequency_mhz: None,
-        signal_percent,
-    })
+    unsafe { WlanCloseHandle(handle, std::ptr::null()) };
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -241,210 +383,177 @@ pub struct WindowsProbe;
 
 impl PlatformProbe for WindowsProbe {
     async fn default_route(&self) -> Option<RouteInfo> {
-        let r = exec_cmd(powershell(
-            "Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Select-Object NextHop,InterfaceAlias,InterfaceIndex,RouteMetric | Format-List",
-        ))
-        .await
-        .ok()?;
-        parse_get_netroute(&r.stdout)
+        // GetBestRoute2 to a public address = "what's my default route".
+        let dest = ipv4_sockaddr_inet(Ipv4Addr::new(8, 8, 8, 8));
+        let mut row: MIB_IPFORWARD_ROW2 = unsafe { std::mem::zeroed() };
+        let mut best_src: SOCKADDR_INET = unsafe { std::mem::zeroed() };
+        let err = unsafe {
+            GetBestRoute2(
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                &dest,
+                0,
+                &mut row,
+                &mut best_src,
+            )
+        };
+        if err != NO_ERROR {
+            return None;
+        }
+        let gateway = unsafe { sockaddr_inet_ipv4(&row.NextHop) }?;
+        if gateway.is_unspecified() {
+            return None; // on-link route, no gateway
+        }
+        let luid = unsafe { row.InterfaceLuid.Value };
+        let adapters = list_adapters();
+        let device = adapters
+            .iter()
+            .find(|a| a.luid == luid)
+            .map(|a| a.friendly_name.clone())?;
+        Some(RouteInfo { gateway: gateway.to_string(), device })
     }
 
     async fn interface_addr(&self, iface: &str) -> Option<AddrInfo> {
-        let r = exec_cmd(powershell(
-            "Get-NetIPAddress -AddressFamily IPv4 | Select-Object IPAddress,InterfaceAlias,PrefixLength | Format-List",
-        ))
-        .await
-        .ok()?;
-        parse_get_netipaddress(&r.stdout, iface)
+        let adapters = list_adapters();
+        let a = adapter_by_name(&adapters, iface)?;
+        let (ip, prefix) = a.ipv4.first()?;
+        Some(AddrInfo { ip: ip.to_string(), prefix: *prefix as u32 })
     }
 
     async fn arp_neighbors(&self, iface: &str, gateway_ip: Option<&str>) -> Vec<ArpNeighbor> {
-        let r = exec_cmd(powershell(
-            "Get-NetNeighbor -AddressFamily IPv4 | Select-Object IPAddress,LinkLayerAddress,State,InterfaceAlias | Format-List",
-        ))
-        .await
-        .unwrap_or_else(|_| empty());
-        parse_get_netneighbor(&r.stdout, iface, gateway_ip)
+        let adapters = list_adapters();
+        let Some(target_luid) = adapter_by_name(&adapters, iface).map(|a| a.luid) else {
+            return Vec::new();
+        };
+
+        let mut table: *mut MIB_IPNET_TABLE2 = std::ptr::null_mut();
+        if unsafe { GetIpNetTable2(AF_INET, &mut table) } != NO_ERROR || table.is_null() {
+            return Vec::new();
+        }
+        let t = unsafe { &*table };
+        let rows = unsafe {
+            std::slice::from_raw_parts(t.Table.as_ptr(), t.NumEntries as usize)
+        };
+
+        let mut neighbors = Vec::new();
+        for row in rows {
+            if unsafe { row.InterfaceLuid.Value } != target_luid {
+                continue;
+            }
+            let Some(ip) = (unsafe { sockaddr_inet_ipv4(&row.Address) }) else { continue };
+            let mac_bytes = &row.PhysicalAddress[..(row.PhysicalAddressLength as usize).min(32)];
+            if mac_bytes.is_empty() || is_group_or_broadcast(mac_bytes) {
+                continue;
+            }
+            let mac = format_mac(mac_bytes);
+            let ip_str = ip.to_string();
+            neighbors.push(ArpNeighbor {
+                is_gateway: gateway_ip == Some(ip_str.as_str()),
+                vendor: lookup_mac_vendor(mac.as_deref()),
+                ip: ip_str,
+                mac,
+                state: neighbor_state_str(row.State).to_string(),
+                device: iface.to_string(),
+            });
+        }
+
+        unsafe { FreeMibTable(table as *const _) };
+        neighbors
     }
 
     async fn wifi_info(&self) -> Option<WifiInfo> {
-        let r = exec_cmd(cmd(&["netsh", "wlan", "show", "interfaces"])).await.ok()?;
-        parse_netsh_wlan(&r.stdout)
+        tokio::task::spawn_blocking(wlan_info).await.ok().flatten()
     }
 
     async fn dns_info(&self, iface: &str) -> Option<DnsResolverInfo> {
-        let r = exec_cmd(powershell(
-            "Get-DnsClientServerAddress -AddressFamily IPv4 | Select-Object InterfaceAlias,InterfaceIndex,ServerAddresses | Format-List",
-        ))
-        .await
-        .ok()?;
-        parse_get_dnsclientserveraddress(&r.stdout, iface)
+        let adapters = list_adapters();
+        let a = adapter_by_name(&adapters, iface)?;
+        if a.dns_servers.is_empty() {
+            return None;
+        }
+        let servers: Vec<String> = a.dns_servers.iter().map(|ip| ip.to_string()).collect();
+        Some(DnsResolverInfo {
+            link: iface.to_string(),
+            current_server: servers.first().cloned(),
+            servers,
+            source: DnsSource::ResolvConf,
+        })
     }
 
-    /// Not implemented on Windows — returns None, same as macOS.
-    /// TODO: `Resolve-DnsName -Type TXT whoami.cloudflare.com` uses the
-    /// system resolver and would give the egress IP.
+    /// Not implemented on Windows — returns None, same as macOS. The
+    /// DNS-interception verdict is `uncertain` as a result.
     async fn system_egress_ip(&self) -> Option<String> {
         None
     }
 
     async fn interface_type(&self, iface: &str) -> InterfaceKind {
-        if is_vpn_iface(iface) {
-            return InterfaceKind::Vpn;
+        let adapters = list_adapters();
+        match adapter_by_name(&adapters, iface) {
+            Some(a) => classify_if_type(a.if_type, iface),
+            None => classify_if_type(0, iface),
         }
-        if let Ok(r) = exec_cmd(powershell(
-            "Get-NetAdapter | Select-Object Name,InterfaceDescription,PhysicalMediaType,Status,ifIndex | Format-List",
-        ))
-        .await
-            && let Some(kind) = parse_get_netadapter_kind(&r.stdout, iface)
-        {
-            return kind;
-        }
-        InterfaceKind::Ethernet
     }
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Tests — pure mappings only. Pointer-walking is covered by the contract
+// tests (tests/topology.rs, tests/security.rs, tests/reliability.rs) on a
+// real Windows machine.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    macro_rules! fixture {
-        ($context:literal, $file:literal) => {
-            include_str!(concat!("../../tests/fixtures/", $context, "/", $file))
-        };
-    }
-
-    const CTX: &str = "ethernet-vmware-windows";
-
-    // --- Fixture-based tests: ethernet-vmware-windows ---
-
     #[test]
-    fn fixture_get_netroute_parses_ethernet_vmware_windows() {
-        let raw = fixture!("ethernet-vmware-windows", "get-netroute_default.txt");
-        let route = parse_get_netroute(raw).unwrap();
-        assert_eq!(route.gateway, "172.16.228.2");
-        assert_eq!(route.device, "Ethernet0");
+    fn dot11_auth_maps_to_encryption_bucket() {
+        assert_eq!(classify_dot11_auth(1), WifiEncryption::Open);
+        assert_eq!(classify_dot11_auth(4), WifiEncryption::Wpa); // WPA_PSK
+        assert_eq!(classify_dot11_auth(6), WifiEncryption::Wpa2Enterprise); // RSNA
+        assert_eq!(classify_dot11_auth(7), WifiEncryption::Wpa2); // RSNA_PSK
+        assert_eq!(classify_dot11_auth(8), WifiEncryption::Wpa3); // WPA3
+        assert_eq!(classify_dot11_auth(9), WifiEncryption::Wpa3); // WPA3_SAE
+        assert_eq!(classify_dot11_auth(-2), WifiEncryption::Unknown); // IHV range
     }
 
     #[test]
-    fn fixture_get_netipaddress_parses_ethernet_vmware_windows() {
-        let raw = fixture!("ethernet-vmware-windows", "get-netipaddress_ipv4.txt");
-        let addr = parse_get_netipaddress(raw, "Ethernet0").unwrap();
-        assert_eq!(addr.ip, "172.16.228.128");
-        assert_eq!(addr.prefix, 24);
-        // The loopback record must not be picked up for a real interface.
-        assert!(parse_get_netipaddress(raw, "Ethernet1").is_none());
+    fn if_type_maps_to_interface_kind() {
+        assert_eq!(classify_if_type(IF_TYPE_IEEE80211, "Wi-Fi"), InterfaceKind::WiFi);
+        assert_eq!(classify_if_type(IF_TYPE_ETHERNET_CSMACD, "Ethernet0"), InterfaceKind::Ethernet);
+        assert_eq!(classify_if_type(IF_TYPE_TUNNEL, "wg0"), InterfaceKind::Vpn);
+        assert_eq!(classify_if_type(999, "weird0"), InterfaceKind::Other);
+        // name-based VPN detection wins even when the media type says Ethernet
+        assert_eq!(classify_if_type(IF_TYPE_ETHERNET_CSMACD, "tailscale0"), InterfaceKind::Vpn);
     }
 
     #[test]
-    fn fixture_get_netneighbor_filters_multicast_and_broadcast() {
-        let raw = fixture!("ethernet-vmware-windows", "get-netneighbor_ipv4.txt");
-        let neighbors = parse_get_netneighbor(raw, "Ethernet0", Some("172.16.228.2"));
-        assert!(!neighbors.is_empty());
-        for n in &neighbors {
-            let mac = n.mac.as_deref().unwrap_or("");
-            let first = u8::from_str_radix(mac.split('-').next().unwrap_or("0"), 16).unwrap_or(0);
-            assert_eq!(first & 1, 0, "multicast/broadcast MAC leaked: {mac}");
-            assert_eq!(n.device, "Ethernet0");
-        }
-        // The gateway (a real VMware NIC) is present and flagged.
-        let gw = neighbors.iter().find(|n| n.ip == "172.16.228.2").unwrap();
-        assert!(gw.is_gateway);
-        assert_eq!(gw.mac.as_deref(), Some("00-50-56-FE-6E-A0"));
-        assert_eq!(gw.state, "Reachable");
-        // 00:50:56 (VMware) is not in the curated vendor table -> None, not a guess.
-        assert_eq!(gw.vendor, None);
+    fn filters_multicast_and_broadcast_macs() {
+        assert!(is_group_or_broadcast(&[0x01, 0x00, 0x5e, 0, 0, 0x16])); // IPv4 multicast
+        assert!(is_group_or_broadcast(&[0xff; 6])); // broadcast
+        assert!(is_group_or_broadcast(&[])); // no MAC
+        assert!(!is_group_or_broadcast(&[0x00, 0x50, 0x56, 0xfe, 0x6e, 0xa0])); // unicast
     }
 
     #[test]
-    fn fixture_get_dnsclientserveraddress_parses_ethernet_vmware_windows() {
-        let raw = fixture!("ethernet-vmware-windows", "get-dnsclientserveraddress_ipv4.txt");
-        let dns = parse_get_dnsclientserveraddress(raw, "Ethernet0").unwrap();
-        assert_eq!(dns.servers, vec!["172.16.228.2".to_string()]);
-        assert_eq!(dns.current_server, Some("172.16.228.2".to_string()));
-        // Loopback has an empty {} server list -> no resolver info.
-        assert!(parse_get_dnsclientserveraddress(raw, "Loopback Pseudo-Interface 1").is_none());
+    fn format_mac_is_uppercase_dash_separated() {
+        assert_eq!(
+            format_mac(&[0x00, 0x50, 0x56, 0xfe, 0x6e, 0xa0]).as_deref(),
+            Some("00-50-56-FE-6E-A0")
+        );
+        // and round-trips through the shared vendor lookup
+        assert_eq!(
+            lookup_mac_vendor(format_mac(&[0x68, 0x7f, 0xf0, 1, 2, 3]).as_deref()),
+            Some("TP-Link".to_string())
+        );
+        assert_eq!(format_mac(&[]), None);
     }
 
     #[test]
-    fn fixture_get_netadapter_identifies_ethernet_vmware_windows() {
-        let raw = fixture!("ethernet-vmware-windows", "get-netadapter.txt");
-        assert_eq!(parse_get_netadapter_kind(raw, "Ethernet0"), Some(InterfaceKind::Ethernet));
-        assert_eq!(parse_get_netadapter_kind(raw, "Wi-Fi"), None);
-    }
-
-    #[test]
-    fn fixture_netsh_wlan_service_not_running_yields_no_wifi() {
-        let raw = fixture!("ethernet-vmware-windows", "netsh_wlan_show_interfaces.txt");
-        // "The Wireless AutoConfig Service (wlansvc) is not running." — no SSID line.
-        assert!(parse_netsh_wlan(raw).is_none());
-    }
-
-    #[test]
-    #[ignore = "needs: tests/fixtures/wifi-windows/netsh_wlan_show_interfaces.txt — run capture.sh on a Windows machine associated to an AP (see tests/fixtures/NEEDED.md)"]
-    fn fixture_netsh_wlan_connected_reports_ssid_and_encryption() {
-        // No real connected-WiFi capture exists yet. The synthetic-input tests
-        // above pin the parse against Microsoft's documented format; this test
-        // stays ignored until a real capture can replace them with exact
-        // assertions on a known network.
-    }
-
-    // Silence dead-code warning for CTX while it documents the fixture dir.
-    #[test]
-    fn fixture_context_name_is_stable() {
-        assert_eq!(CTX, "ethernet-vmware-windows");
-    }
-
-    // --- Synthetic-input parser unit tests (labels/format from Microsoft docs) ---
-
-    #[test]
-    fn get_netroute_prefers_lowest_metric_and_skips_onlink() {
-        let raw = "\nNextHop        : 0.0.0.0\nInterfaceAlias : Ethernet0\nRouteMetric    : 5\n\nNextHop        : 10.0.0.1\nInterfaceAlias : Wi-Fi\nRouteMetric    : 25\n\nNextHop        : 10.0.0.254\nInterfaceAlias : Ethernet 2\nRouteMetric    : 10\n";
-        let route = parse_get_netroute(raw).unwrap();
-        assert_eq!(route.gateway, "10.0.0.254");
-        assert_eq!(route.device, "Ethernet 2");
-    }
-
-    #[test]
-    fn netsh_wlan_wpa2_personal_is_wpa2_not_enterprise() {
-        let raw = "    Name                   : Wi-Fi\n    SSID                    : CoffeeShop\n    BSSID                   : aa:bb:cc:dd:ee:ff\n    Authentication         : WPA2-Personal\n    Channel                : 44\n    Signal                 : 78%\n";
-        let w = parse_netsh_wlan(raw).unwrap();
-        assert_eq!(w.ssid, "CoffeeShop");
-        assert_eq!(w.encryption, WifiEncryption::Wpa2);
-        assert_eq!(w.channel, Some(44));
-        assert_eq!(w.signal_percent, Some(78));
-    }
-
-    #[test]
-    fn netsh_wlan_open_network() {
-        let raw = "    SSID                    : FreeWiFi\n    Authentication         : Open\n    Channel                : 6\n    Signal                 : 40%\n";
-        assert_eq!(parse_netsh_wlan(raw).unwrap().encryption, WifiEncryption::Open);
-    }
-
-    #[test]
-    fn netsh_wlan_wpa3_and_enterprise() {
-        let wpa3 = "    SSID : Secure\n    Authentication : WPA3-Personal\n";
-        assert_eq!(parse_netsh_wlan(wpa3).unwrap().encryption, WifiEncryption::Wpa3);
-        let ent = "    SSID : Corp\n    Authentication : WPA2-Enterprise\n";
-        assert_eq!(parse_netsh_wlan(ent).unwrap().encryption, WifiEncryption::Wpa2Enterprise);
-    }
-
-    #[test]
-    fn netsh_wlan_no_ssid_returns_none() {
-        let raw = "    There is no wireless interface on the system.\n";
-        assert!(parse_netsh_wlan(raw).is_none());
-    }
-
-    #[test]
-    fn format_list_handles_crlf_and_blank_padding() {
-        let raw = "\r\n\r\nKey1 : a\r\nKey2 : b\r\n\r\nKey1 : c\r\n\r\n\r\n";
-        let records = parse_format_list(raw);
-        assert_eq!(records.len(), 2);
-        assert_eq!(field(&records[0], "Key1"), Some("a"));
-        assert_eq!(field(&records[1], "Key1"), Some("c"));
+    fn neighbor_state_labels() {
+        assert_eq!(neighbor_state_str(5), "Reachable");
+        assert_eq!(neighbor_state_str(4), "Stale");
+        assert_eq!(neighbor_state_str(6), "Permanent");
+        assert_eq!(neighbor_state_str(42), "Unknown");
     }
 }

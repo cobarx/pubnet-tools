@@ -1,6 +1,0 @@
-context      = "ethernet-vmware-windows"
-captured_at  = "2026-08-27T04:27:49Z"
-os           = "Microsoft Windows 11 Home 10.0.26200.0"
-interface    = "Ethernet0"
-network_type = "ethernet"
-notes        = "VMware NAT Ethernet (Ethernet0), no wireless adapter (wlansvc not running, so netsh wlan errors), Windows 11 Home 10.0.26200, gateway 172.16.228.2 is a VMware virtual NIC (00:50:56 OUI, not in the curated vendor table). Captured from Git Bash; commands run via powershell -NoProfile."

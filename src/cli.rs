@@ -1,10 +1,9 @@
-use crate::checks::reliability::check_reliability;
+use crate::checks::reliability::{check_reliability, system_ping};
 use crate::checks::security::check_security;
 use crate::checks::speed::{check_speed, default_locate, DEFAULT_TEST_DURATION};
 use crate::checks::topology::check_topology;
-use crate::exec::exec_cmd;
 #[cfg(not(windows))]
-use crate::exec::cmd;
+use crate::exec::{cmd, exec_cmd};
 use crate::output::renderer::render_report;
 use crate::output::reporter::{default_reports_dir, save_report};
 use crate::scoring::{calculate_score, ScorableResult};
@@ -282,7 +281,7 @@ pub async fn run_audit(options: RunAuditOptions) -> Report {
         },
         async {
             if should_run(CheckName::Reliability) {
-                check_reliability(gateway_ip.as_deref(), &exec_cmd, &options.exclude_targets).await
+                check_reliability(gateway_ip.as_deref(), &system_ping, &options.exclude_targets).await
             } else {
                 excluded_result("reliability")
             }
