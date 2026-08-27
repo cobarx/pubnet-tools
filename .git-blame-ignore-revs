@@ -1,0 +1,3 @@
+# Tree-wide rustfmt pass — not a real change, skip it in blame.
+# Use: git config blame.ignoreRevsFile .git-blame-ignore-revs
+fa25b14b4cd33a6abc6e929d31c1fd5613866fba
