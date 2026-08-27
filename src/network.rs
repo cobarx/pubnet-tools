@@ -55,7 +55,11 @@ fn split_terse_fields(line: &str) -> Vec<String> {
 fn parse_u32_or_none(value: Option<&str>) -> Option<u32> {
     value.and_then(|v| {
         let digits: String = v.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if digits.is_empty() { None } else { digits.parse().ok() }
+        if digits.is_empty() {
+            None
+        } else {
+            digits.parse().ok()
+        }
     })
 }
 
@@ -231,8 +235,9 @@ pub struct PingSummary {
 #[cfg(not(windows))]
 static PING_TIME_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"time=([\d.]+) ms").unwrap());
 #[cfg(not(windows))]
-static PING_SUMMARY_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(\d+) packets transmitted, (\d+) (?:packets )?received").unwrap());
+static PING_SUMMARY_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(\d+) packets transmitted, (\d+) (?:packets )?received").unwrap()
+});
 
 #[cfg(not(windows))]
 pub fn parse_ping_output(raw: &str) -> PingSummary {
@@ -243,15 +248,14 @@ pub fn parse_ping_output(raw: &str) -> PingSummary {
 
     let (transmitted, received) = PING_SUMMARY_RE
         .captures(raw)
-        .map(|c| {
-            (
-                c[1].parse().unwrap_or(0),
-                c[2].parse().unwrap_or(0),
-            )
-        })
+        .map(|c| (c[1].parse().unwrap_or(0), c[2].parse().unwrap_or(0)))
         .unwrap_or((0, 0));
 
-    PingSummary { transmitted, received, rtts }
+    PingSummary {
+        transmitted,
+        received,
+        rtts,
+    }
 }
 
 pub fn parse_resolvectl_status(raw: &str, iface: &str) -> Option<DnsResolverInfo> {
@@ -316,7 +320,11 @@ pub fn ipv4_in_cidr(ip: &str, cidr: &str) -> Option<bool> {
     if prefix > 32 {
         return None;
     }
-    let mask = if prefix == 0 { 0 } else { u32::MAX << (32 - prefix) };
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix)
+    };
     Some(u32::from(ip) & mask == u32::from(network) & mask)
 }
 
@@ -338,7 +346,11 @@ pub enum IpFamily {
 }
 
 pub fn ip_family(ip: &str) -> IpFamily {
-    if is_valid_ipv4(ip) { IpFamily::V4 } else { IpFamily::V6 }
+    if is_valid_ipv4(ip) {
+        IpFamily::V4
+    } else {
+        IpFamily::V6
+    }
 }
 
 #[cfg(test)]
@@ -448,10 +460,22 @@ mod tests {
     fn known_vendor_prefixes_resolve_correctly() {
         // Real gateway MAC seen on this dev machine, verified against the
         // real IEEE OUI registry — see network.ts's port of this test.
-        assert_eq!(lookup_mac_vendor(Some("68:7f:f0:55:77:7b")), Some("TP-Link".to_string()));
-        assert_eq!(lookup_mac_vendor(Some("40:5d:82:aa:bb:cc")), Some("NETGEAR".to_string()));
-        assert_eq!(lookup_mac_vendor(Some("f0:ee:7a:aa:bb:cc")), Some("Apple".to_string()));
-        assert_eq!(lookup_mac_vendor(Some("08:55:31:aa:bb:cc")), Some("MikroTik".to_string()));
+        assert_eq!(
+            lookup_mac_vendor(Some("68:7f:f0:55:77:7b")),
+            Some("TP-Link".to_string())
+        );
+        assert_eq!(
+            lookup_mac_vendor(Some("40:5d:82:aa:bb:cc")),
+            Some("NETGEAR".to_string())
+        );
+        assert_eq!(
+            lookup_mac_vendor(Some("f0:ee:7a:aa:bb:cc")),
+            Some("Apple".to_string())
+        );
+        assert_eq!(
+            lookup_mac_vendor(Some("08:55:31:aa:bb:cc")),
+            Some("MikroTik".to_string())
+        );
     }
 
     #[test]
@@ -466,7 +490,10 @@ mod tests {
 
     #[test]
     fn is_case_and_separator_insensitive() {
-        assert_eq!(lookup_mac_vendor(Some("68-7F-F0-55-77-7B")), Some("TP-Link".to_string()));
+        assert_eq!(
+            lookup_mac_vendor(Some("68-7F-F0-55-77-7B")),
+            Some("TP-Link".to_string())
+        );
     }
 
     // --- parse_ip_neigh ---
@@ -617,8 +644,12 @@ mod tests {
 
     #[test]
     fn extracts_ipv6_remote_ip_from_resolvectl_txt() {
-        let raw = "whoami.cloudflare.com IN TXT \"remote_ip: 2607:f8b0:4004:1001::12e\" -- link: wlan0";
-        assert_eq!(extract_remote_ip(raw), Some("2607:f8b0:4004:1001::12e".to_string()));
+        let raw =
+            "whoami.cloudflare.com IN TXT \"remote_ip: 2607:f8b0:4004:1001::12e\" -- link: wlan0";
+        assert_eq!(
+            extract_remote_ip(raw),
+            Some("2607:f8b0:4004:1001::12e".to_string())
+        );
     }
 
     #[test]
@@ -630,11 +661,17 @@ mod tests {
     #[test]
     fn extracts_ipv6_remote_ip_from_google_doh_json_no_quoting() {
         let raw = r#"{"Answer":[{"data":"remote_ip: 2607:f8b0:4004:1009::12c"}]}"#;
-        assert_eq!(extract_remote_ip(raw), Some("2607:f8b0:4004:1009::12c".to_string()));
+        assert_eq!(
+            extract_remote_ip(raw),
+            Some("2607:f8b0:4004:1009::12c".to_string())
+        );
     }
 
     #[test]
     fn no_remote_ip_field_returns_none() {
-        assert_eq!(extract_remote_ip(r#"{"Answer":[{"data":"asn: 13335"}]}"#), None);
+        assert_eq!(
+            extract_remote_ip(r#"{"Answer":[{"data":"asn: 13335"}]}"#),
+            None
+        );
     }
 }

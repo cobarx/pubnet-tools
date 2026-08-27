@@ -10,23 +10,22 @@
 
 #![allow(non_upper_case_globals)]
 
-use super::{is_vpn_iface, AddrInfo, PlatformProbe, RouteInfo, WifiInfo};
-use crate::network::{lookup_mac_vendor, PingSummary};
+use super::{AddrInfo, PlatformProbe, RouteInfo, WifiInfo, is_vpn_iface};
+use crate::network::{PingSummary, lookup_mac_vendor};
 use crate::types::{ArpNeighbor, DnsResolverInfo, DnsSource, InterfaceKind, WifiEncryption};
 use std::net::Ipv4Addr;
 
 use windows_sys::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, HANDLE, NO_ERROR};
 use windows_sys::Win32::NetworkManagement::IpHelper::{
-    FreeMibTable, GetAdaptersAddresses, GetBestRoute2, GetIpNetTable2, IcmpCloseHandle,
-    IcmpCreateFile, IcmpSendEcho2, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_MULTICAST,
-    ICMP_ECHO_REPLY, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211,
-    IF_TYPE_PPP, IF_TYPE_TUNNEL, IP_ADAPTER_ADDRESSES_LH, IP_SUCCESS, MIB_IPFORWARD_ROW2,
-    MIB_IPNET_TABLE2,
+    FreeMibTable, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_MULTICAST, GetAdaptersAddresses,
+    GetBestRoute2, GetIpNetTable2, ICMP_ECHO_REPLY, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211,
+    IF_TYPE_PPP, IF_TYPE_TUNNEL, IP_ADAPTER_ADDRESSES_LH, IP_SUCCESS, IcmpCloseHandle,
+    IcmpCreateFile, IcmpSendEcho2, MIB_IPFORWARD_ROW2, MIB_IPNET_TABLE2,
 };
 use windows_sys::Win32::NetworkManagement::WiFi::{
-    wlan_intf_opcode_channel_number, wlan_intf_opcode_current_connection, WlanCloseHandle,
-    WlanEnumInterfaces, WlanFreeMemory, WlanOpenHandle, WlanQueryInterface, DOT11_AUTH_ALGORITHM,
-    WLAN_CONNECTION_ATTRIBUTES, WLAN_INTERFACE_INFO_LIST,
+    DOT11_AUTH_ALGORITHM, WLAN_CONNECTION_ATTRIBUTES, WLAN_INTERFACE_INFO_LIST, WlanCloseHandle,
+    WlanEnumInterfaces, WlanFreeMemory, WlanOpenHandle, WlanQueryInterface,
+    wlan_intf_opcode_channel_number, wlan_intf_opcode_current_connection,
 };
 use windows_sys::Win32::Networking::WinSock::{
     AF_INET, IN_ADDR, IN_ADDR_0, SOCKADDR, SOCKADDR_IN, SOCKADDR_INET,
@@ -100,7 +99,12 @@ fn format_mac(mac: &[u8]) -> Option<String> {
     if mac.is_empty() {
         return None;
     }
-    Some(mac.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join("-"))
+    Some(
+        mac.iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join("-"),
+    )
 }
 
 /// `dot11AuthAlgorithm` (from `WLAN_SECURITY_ATTRIBUTES`) → our bucket.
@@ -191,7 +195,11 @@ fn ipv4_sockaddr_inet(ip: Ipv4Addr) -> SOCKADDR_INET {
     sa.Ipv4 = SOCKADDR_IN {
         sin_family: AF_INET,
         sin_port: 0,
-        sin_addr: IN_ADDR { S_un: IN_ADDR_0 { S_addr: u32::from_ne_bytes(ip.octets()) } },
+        sin_addr: IN_ADDR {
+            S_un: IN_ADDR_0 {
+                S_addr: u32::from_ne_bytes(ip.octets()),
+            },
+        },
         sin_zero: [0; 8],
     };
     sa
@@ -298,7 +306,11 @@ impl Drop for IcmpHandle {
 }
 
 fn icmp_ping_blocking(ip: Ipv4Addr, count: u32) -> PingSummary {
-    let all_fail = PingSummary { transmitted: count, received: 0, rtts: Vec::new() };
+    let all_fail = PingSummary {
+        transmitted: count,
+        received: 0,
+        rtts: Vec::new(),
+    };
 
     let raw = unsafe { IcmpCreateFile() };
     if raw == INVALID_HANDLE_VALUE || raw.is_null() {
@@ -347,18 +359,30 @@ fn icmp_ping_blocking(ip: Ipv4Addr, count: u32) -> PingSummary {
     }
 
     drop(handle); // IcmpCloseHandle
-    PingSummary { transmitted: count, received: rtts.len() as u32, rtts }
+    PingSummary {
+        transmitted: count,
+        received: rtts.len() as u32,
+        rtts,
+    }
 }
 
 /// Ping `host` `count` times over ICMP. Runs on the blocking pool — each echo
 /// is a synchronous `IcmpSendEcho2`.
 pub async fn icmp_ping(host: &str, count: u32) -> PingSummary {
     let Ok(ip) = host.parse::<Ipv4Addr>() else {
-        return PingSummary { transmitted: count, received: 0, rtts: Vec::new() };
+        return PingSummary {
+            transmitted: count,
+            received: 0,
+            rtts: Vec::new(),
+        };
     };
     tokio::task::spawn_blocking(move || icmp_ping_blocking(ip, count))
         .await
-        .unwrap_or(PingSummary { transmitted: count, received: 0, rtts: Vec::new() })
+        .unwrap_or(PingSummary {
+            transmitted: count,
+            received: 0,
+            rtts: Vec::new(),
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -382,7 +406,11 @@ impl Drop for WlanMem {
 }
 
 /// `opcode` → a `WlanMem` blob plus its byte size, or `None`.
-fn wlan_query(handle: HANDLE, guid: &windows_sys::core::GUID, opcode: i32) -> Option<(WlanMem, u32)> {
+fn wlan_query(
+    handle: HANDLE,
+    guid: &windows_sys::core::GUID,
+    opcode: i32,
+) -> Option<(WlanMem, u32)> {
     let mut size: u32 = 0;
     let mut data: *mut std::ffi::c_void = std::ptr::null_mut();
     let ret = unsafe {
@@ -444,17 +472,22 @@ fn wlan_info() -> Option<WifiInfo> {
     let encryption = classify_dot11_auth(conn.wlanSecurityAttributes.dot11AuthAlgorithm);
 
     // channel_number — a separate query, absent on some drivers.
-    let channel = wlan_query(handle.0, &guid, wlan_intf_opcode_channel_number).and_then(
-        |(mem, size)| {
+    let channel =
+        wlan_query(handle.0, &guid, wlan_intf_opcode_channel_number).and_then(|(mem, size)| {
             if (size as usize) < std::mem::size_of::<u32>() {
                 return None;
             }
             let ch = unsafe { *(mem.0 as *const u32) };
             (1..=196).contains(&ch).then_some(ch)
-        },
-    );
+        });
 
-    Some(WifiInfo { ssid, encryption, channel, frequency_mhz: None, signal_percent })
+    Some(WifiInfo {
+        ssid,
+        encryption,
+        channel,
+        frequency_mhz: None,
+        signal_percent,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -498,14 +531,20 @@ impl PlatformProbe for WindowsProbe {
             .find(|a| a.luid == luid)
             .map(|a| a.friendly_name)
             .filter(|name| !name.is_empty())?;
-        Some(RouteInfo { gateway: gateway.to_string(), device })
+        Some(RouteInfo {
+            gateway: gateway.to_string(),
+            device,
+        })
     }
 
     async fn interface_addr(&self, iface: &str) -> Option<AddrInfo> {
         let adapters = list_adapters();
         let a = adapter_by_name(&adapters, iface)?;
         let (ip, prefix) = a.ipv4.iter().find(|(ip, _)| is_plausible_host_ipv4(*ip))?;
-        Some(AddrInfo { ip: ip.to_string(), prefix: *prefix })
+        Some(AddrInfo {
+            ip: ip.to_string(),
+            prefix: *prefix,
+        })
     }
 
     async fn arp_neighbors(&self, iface: &str, gateway_ip: Option<&str>) -> Vec<ArpNeighbor> {
@@ -529,7 +568,9 @@ impl PlatformProbe for WindowsProbe {
             if unsafe { row.InterfaceLuid.Value } != target_luid {
                 continue;
             }
-            let Some(ip) = (unsafe { sockaddr_inet_ipv4(&row.Address) }) else { continue };
+            let Some(ip) = (unsafe { sockaddr_inet_ipv4(&row.Address) }) else {
+                continue;
+            };
             if !is_plausible_host_ipv4(ip) {
                 continue;
             }
@@ -611,12 +652,21 @@ mod tests {
 
     #[test]
     fn if_type_maps_to_interface_kind() {
-        assert_eq!(classify_if_type(IF_TYPE_IEEE80211, "Wi-Fi"), InterfaceKind::WiFi);
-        assert_eq!(classify_if_type(IF_TYPE_ETHERNET_CSMACD, "Ethernet0"), InterfaceKind::Ethernet);
+        assert_eq!(
+            classify_if_type(IF_TYPE_IEEE80211, "Wi-Fi"),
+            InterfaceKind::WiFi
+        );
+        assert_eq!(
+            classify_if_type(IF_TYPE_ETHERNET_CSMACD, "Ethernet0"),
+            InterfaceKind::Ethernet
+        );
         assert_eq!(classify_if_type(IF_TYPE_TUNNEL, "wg0"), InterfaceKind::Vpn);
         assert_eq!(classify_if_type(999, "weird0"), InterfaceKind::Other);
         // name-based VPN detection wins even when the media type says Ethernet
-        assert_eq!(classify_if_type(IF_TYPE_ETHERNET_CSMACD, "tailscale0"), InterfaceKind::Vpn);
+        assert_eq!(
+            classify_if_type(IF_TYPE_ETHERNET_CSMACD, "tailscale0"),
+            InterfaceKind::Vpn
+        );
     }
 
     #[test]
@@ -624,7 +674,9 @@ mod tests {
         assert!(is_group_or_broadcast(&[0x01, 0x00, 0x5e, 0, 0, 0x16])); // IPv4 multicast
         assert!(is_group_or_broadcast(&[0xff; 6])); // broadcast
         assert!(is_group_or_broadcast(&[])); // no MAC
-        assert!(!is_group_or_broadcast(&[0x00, 0x50, 0x56, 0xfe, 0x6e, 0xa0])); // unicast
+        assert!(!is_group_or_broadcast(&[
+            0x00, 0x50, 0x56, 0xfe, 0x6e, 0xa0
+        ])); // unicast
     }
 
     #[test]

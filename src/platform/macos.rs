@@ -1,8 +1,8 @@
 //! macOS implementation of PlatformProbe.
 //! Commands: route, ifconfig, arp, airport, scutil.
 
-use super::{is_vpn_iface, AddrInfo, PlatformProbe, RouteInfo, WifiInfo};
-use crate::exec::{cmd, exec_cmd, ExecResult};
+use super::{AddrInfo, PlatformProbe, RouteInfo, WifiInfo, is_vpn_iface};
+use crate::exec::{ExecResult, cmd, exec_cmd};
 use crate::network::lookup_mac_vendor;
 use crate::types::{ArpNeighbor, DnsResolverInfo, DnsSource, InterfaceKind, WifiEncryption};
 use regex::Regex;
@@ -12,7 +12,11 @@ const AIRPORT: &str =
     "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport";
 
 fn empty() -> ExecResult {
-    ExecResult { stdout: String::new(), stderr: String::new(), exit_code: None }
+    ExecResult {
+        stdout: String::new(),
+        stderr: String::new(),
+        exit_code: None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -31,8 +35,9 @@ pub fn parse_route_get(raw: &str) -> Option<RouteInfo> {
     Some(RouteInfo { gateway, device })
 }
 
-static IFCONFIG_INET_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?m)^\s*inet (\d+\.\d+\.\d+\.\d+) netmask (0x[0-9a-f]+)").unwrap());
+static IFCONFIG_INET_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^\s*inet (\d+\.\d+\.\d+\.\d+) netmask (0x[0-9a-f]+)").unwrap()
+});
 
 fn hex_mask_to_prefix(hex: &str) -> Option<u32> {
     let val = u32::from_str_radix(hex.trim_start_matches("0x"), 16).ok()?;
@@ -47,20 +52,21 @@ pub fn parse_ifconfig(raw: &str) -> Option<AddrInfo> {
     Some(AddrInfo { ip, prefix })
 }
 
-static ARP_ENTRY_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-f:]+) on (\S+)").unwrap()
-});
+static ARP_ENTRY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-f:]+) on (\S+)").unwrap());
 
 /// Parses `arp -an -i <iface>`.
 pub fn parse_arp(raw: &str, iface: &str, gateway_ip: Option<&str>) -> Vec<ArpNeighbor> {
     let mut neighbors = Vec::new();
     for line in raw.lines() {
-        let Some(caps) = ARP_ENTRY_RE.captures(line) else { continue };
+        let Some(caps) = ARP_ENTRY_RE.captures(line) else {
+            continue;
+        };
         let ip = caps[1].to_string();
         let mac_str = &caps[2];
         // Skip broadcast (ff:ff:ff:ff:ff:ff) and multicast (I/G bit set in first octet)
-        let first_byte = u8::from_str_radix(mac_str.split(':').next().unwrap_or("0"), 16)
-            .unwrap_or(0);
+        let first_byte =
+            u8::from_str_radix(mac_str.split(':').next().unwrap_or("0"), 16).unwrap_or(0);
         if first_byte & 1 != 0 {
             continue;
         }
@@ -101,7 +107,9 @@ pub fn parse_airport(raw: &str) -> Option<WifiInfo> {
     let mut signal_percent: Option<u32> = None;
 
     for line in raw.lines() {
-        let Some((key, val)) = line.split_once(':') else { continue };
+        let Some((key, val)) = line.split_once(':') else {
+            continue;
+        };
         match key.trim() {
             "SSID" => ssid = Some(val.trim().to_string()),
             "link auth" => encryption = classify_airport_security(val),
@@ -118,7 +126,13 @@ pub fn parse_airport(raw: &str) -> Option<WifiInfo> {
         }
     }
 
-    Some(WifiInfo { ssid: ssid?, encryption, channel, frequency_mhz: None, signal_percent })
+    Some(WifiInfo {
+        ssid: ssid?,
+        encryption,
+        channel,
+        frequency_mhz: None,
+        signal_percent,
+    })
 }
 
 /// Parses `scutil --dns` for the resolver block matching the given interface.
@@ -130,18 +144,19 @@ pub fn parse_scutil_dns(raw: &str, iface: &str) -> Option<DnsResolverInfo> {
     let mut block_servers: Vec<String> = Vec::new();
     let mut block_iface: Option<String> = None;
 
-    let flush = |servers: &mut Vec<String>, found_iface: &mut Option<String>| -> Option<DnsResolverInfo> {
-        if found_iface.as_deref() == Some(iface) && !servers.is_empty() {
-            Some(DnsResolverInfo {
-                link: iface.to_string(),
-                current_server: servers.first().cloned(),
-                servers: servers.clone(),
-                source: DnsSource::Resolvectl,
-            })
-        } else {
-            None
-        }
-    };
+    let flush =
+        |servers: &mut Vec<String>, found_iface: &mut Option<String>| -> Option<DnsResolverInfo> {
+            if found_iface.as_deref() == Some(iface) && !servers.is_empty() {
+                Some(DnsResolverInfo {
+                    link: iface.to_string(),
+                    current_server: servers.first().cloned(),
+                    servers: servers.clone(),
+                    source: DnsSource::Resolvectl,
+                })
+            } else {
+                None
+            }
+        };
 
     for line in raw.lines() {
         let trimmed = line.trim();
@@ -175,7 +190,8 @@ pub fn is_wifi_hardware_port(raw: &str, iface: &str) -> bool {
         }
         if let Some(port) = trimmed.strip_prefix("Hardware Port:") {
             let lower = port.trim().to_lowercase();
-            current_is_wifi = lower.contains("wi-fi") || lower.contains("airport") || lower.contains("wireless");
+            current_is_wifi =
+                lower.contains("wi-fi") || lower.contains("airport") || lower.contains("wireless");
         } else if let Some(dev) = trimmed.strip_prefix("Device:") {
             if dev.trim() == iface && current_is_wifi {
                 return true;
@@ -193,7 +209,9 @@ pub struct MacProbe;
 
 impl PlatformProbe for MacProbe {
     async fn default_route(&self) -> Option<RouteInfo> {
-        let r = exec_cmd(cmd(&["route", "-n", "get", "default"])).await.ok()?;
+        let r = exec_cmd(cmd(&["route", "-n", "get", "default"]))
+            .await
+            .ok()?;
         parse_route_get(&r.stdout)
     }
 
@@ -203,7 +221,9 @@ impl PlatformProbe for MacProbe {
     }
 
     async fn arp_neighbors(&self, iface: &str, gateway_ip: Option<&str>) -> Vec<ArpNeighbor> {
-        let r = exec_cmd(cmd(&["arp", "-an", "-i", iface])).await.unwrap_or_else(|_| empty());
+        let r = exec_cmd(cmd(&["arp", "-an", "-i", iface]))
+            .await
+            .unwrap_or_else(|_| empty());
         parse_arp(&r.stdout, iface, gateway_ip)
     }
 
@@ -247,12 +267,7 @@ mod tests {
     // Fixture helpers — load real captured output from tests/fixtures/<context>/<file>
     macro_rules! fixture {
         ($context:literal, $file:literal) => {
-            include_str!(concat!(
-                "../../tests/fixtures/",
-                $context,
-                "/",
-                $file
-            ))
+            include_str!(concat!("../../tests/fixtures/", $context, "/", $file))
         };
     }
 
@@ -282,8 +297,8 @@ mod tests {
         for n in &neighbors {
             let mac = n.mac.as_deref().unwrap_or("");
             assert_ne!(mac, "ff:ff:ff:ff:ff:ff", "broadcast should be filtered");
-            let first_byte = u8::from_str_radix(mac.split(':').next().unwrap_or("0"), 16)
-                .unwrap_or(0);
+            let first_byte =
+                u8::from_str_radix(mac.split(':').next().unwrap_or("0"), 16).unwrap_or(0);
             assert_eq!(first_byte & 1, 0, "multicast MAC should be filtered: {mac}");
         }
         // Gateway must be present

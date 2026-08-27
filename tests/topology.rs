@@ -39,7 +39,10 @@ async fn discovers_default_interface_gateway_and_arp_neighbors_passively() {
     // here even though each field is individually well-formed. VPN /
     // point-to-point links legitimately have an off-subnet gateway, so this
     // is scoped to WiFi/Ethernet.
-    if matches!(data.interface_kind, InterfaceKind::WiFi | InterfaceKind::Ethernet) {
+    if matches!(
+        data.interface_kind,
+        InterfaceKind::WiFi | InterfaceKind::Ethernet
+    ) {
         assert_eq!(
             ipv4_in_cidr(&data.gateway, &data.ip_cidr),
             Some(true),
@@ -53,5 +56,8 @@ async fn discovers_default_interface_gateway_and_arp_neighbors_passively() {
         assert!(is_valid_ipv4(&neighbor.ip));
         assert_eq!(neighbor.device, data.interface);
     }
-    assert_eq!(data.passive_notice, "Passive ARP cache — no active scan performed.");
+    assert_eq!(
+        data.passive_notice,
+        "Passive ARP cache — no active scan performed."
+    );
 }

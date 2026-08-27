@@ -1,11 +1,11 @@
 //! specs: dns-leak-detection, captive-portal-detection
 //! See docs/decisions/2026-08-24-dns-leak-address-family-matching.md
 
-use crate::network::{extract_remote_ip, ip_family, IpFamily};
+use crate::network::{IpFamily, extract_remote_ip, ip_family};
 use crate::platform::PlatformProbe;
 use crate::types::{
-    CaptivePortalMethod, CaptivePortalResult, CheckResult, CheckStatus, DnsLeakResult, DnsLeakVerdict,
-    DohProbe, DohProvider, Finding, SecurityData, Severity, WifiEncryption,
+    CaptivePortalMethod, CaptivePortalResult, CheckResult, CheckStatus, DnsLeakResult,
+    DnsLeakVerdict, DohProbe, DohProvider, Finding, SecurityData, Severity, WifiEncryption,
 };
 use std::time::{Duration, Instant};
 
@@ -32,10 +32,17 @@ fn same_slash24(a: &str, b: &str) -> bool {
 /// Only IPv4-vs-IPv4 pairs are ever comparable - a family-mismatched or
 /// IPv6-vs-IPv6 pair counts as neither agreement nor disagreement, never
 /// as a false leak or a false clean.
-pub fn classify_dns_leak(system_egress_ip: Option<&str>, raw_probes: &[RawDohProbe]) -> DnsLeakResult {
+pub fn classify_dns_leak(
+    system_egress_ip: Option<&str>,
+    raw_probes: &[RawDohProbe],
+) -> DnsLeakResult {
     let probes: Vec<DohProbe> = raw_probes
         .iter()
-        .map(|p| DohProbe { provider: p.provider, egress_ip: p.egress_ip.clone(), reachable: p.reachable })
+        .map(|p| DohProbe {
+            provider: p.provider,
+            egress_ip: p.egress_ip.clone(),
+            reachable: p.reachable,
+        })
         .collect();
 
     let mut any_comparable = false;
@@ -48,7 +55,9 @@ pub fn classify_dns_leak(system_egress_ip: Option<&str>, raw_probes: &[RawDohPro
             if !p.reachable {
                 continue;
             }
-            let Some(probe_ip) = &p.egress_ip else { continue };
+            let Some(probe_ip) = &p.egress_ip else {
+                continue;
+            };
             if ip_family(probe_ip) != IpFamily::V4 {
                 continue;
             }
@@ -77,7 +86,9 @@ pub fn classify_dns_leak(system_egress_ip: Option<&str>, raw_probes: &[RawDohPro
 
 async fn probe_doh(client: &reqwest::Client, provider: DohProvider) -> RawDohProbe {
     let url = match provider {
-        DohProvider::Cloudflare => "https://cloudflare-dns.com/dns-query?name=whoami.cloudflare.com&type=TXT",
+        DohProvider::Cloudflare => {
+            "https://cloudflare-dns.com/dns-query?name=whoami.cloudflare.com&type=TXT"
+        }
         DohProvider::Google => "https://dns.google/resolve?name=whoami.cloudflare.com&type=TXT",
     };
 
@@ -86,14 +97,26 @@ async fn probe_doh(client: &reqwest::Client, provider: DohProvider) -> RawDohPro
         req = req.header("accept", "application/dns-json");
     }
 
-    let unreachable = RawDohProbe { provider, reachable: false, egress_ip: None };
-    let Ok(res) = req.send().await else { return unreachable };
+    let unreachable = RawDohProbe {
+        provider,
+        reachable: false,
+        egress_ip: None,
+    };
+    let Ok(res) = req.send().await else {
+        return unreachable;
+    };
     if res.status() != 200 {
         return unreachable;
     }
-    let Ok(body) = res.text().await else { return unreachable };
+    let Ok(body) = res.text().await else {
+        return unreachable;
+    };
     let egress_ip = extract_remote_ip(&body);
-    RawDohProbe { provider, reachable: egress_ip.is_some(), egress_ip }
+    RawDohProbe {
+        provider,
+        reachable: egress_ip.is_some(),
+        egress_ip,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +144,12 @@ pub fn classify_captive_portal(
     };
 
     if (300..400).contains(&status) {
-        return (true, CaptivePortalMethod::Redirect, response.location.clone(), Some(status));
+        return (
+            true,
+            CaptivePortalMethod::Redirect,
+            response.location.clone(),
+            Some(status),
+        );
     }
 
     let status_matches = status == expectation.expected_status;
@@ -132,7 +160,12 @@ pub fn classify_captive_portal(
     if status_matches && body_matches {
         (false, CaptivePortalMethod::None, None, Some(status))
     } else {
-        (true, CaptivePortalMethod::ContentMismatch, None, Some(status))
+        (
+            true,
+            CaptivePortalMethod::ContentMismatch,
+            None,
+            Some(status),
+        )
     }
 }
 
@@ -145,11 +178,17 @@ fn canaries() -> Vec<Canary> {
     vec![
         Canary {
             url: "http://connectivitycheck.gstatic.com/generate_204",
-            expectation: CanaryExpectation { expected_status: 204, expected_body_contains: None },
+            expectation: CanaryExpectation {
+                expected_status: 204,
+                expected_body_contains: None,
+            },
         },
         Canary {
             url: "http://captive.apple.com/hotspot-detect.html",
-            expectation: CanaryExpectation { expected_status: 200, expected_body_contains: Some("Success") },
+            expectation: CanaryExpectation {
+                expected_status: 200,
+                expected_body_contains: Some("Success"),
+            },
         },
     ]
 }
@@ -166,11 +205,21 @@ async fn probe_captive_portal() -> CaptivePortalResult {
         let req = client.get(canary.url).timeout(CAPTIVE_TIMEOUT);
         let Ok(res) = req.send().await else { continue };
         let status = res.status().as_u16();
-        let location = res.headers().get("location").and_then(|v| v.to_str().ok()).map(String::from);
+        let location = res
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .map(String::from);
         let body = res.text().await.unwrap_or_default();
 
-        let (detected, method, redirect_location, http_status) =
-            classify_captive_portal(&CanaryResponse { status: Some(status), location, body }, &canary.expectation);
+        let (detected, method, redirect_location, http_status) = classify_captive_portal(
+            &CanaryResponse {
+                status: Some(status),
+                location,
+                body,
+            },
+            &canary.expectation,
+        );
         return CaptivePortalResult {
             detected,
             method,
@@ -286,15 +335,27 @@ pub async fn check_security<P: PlatformProbe>(
 
     let (wifi, dns, system_egress_ip, cloudflare_probe, google_probe, captive_portal) = tokio::join!(
         probe.wifi_info(),
-        async { if let Some(iface) = iface { probe.dns_info(iface).await } else { None } },
+        async {
+            if let Some(iface) = iface {
+                probe.dns_info(iface).await
+            } else {
+                None
+            }
+        },
         probe.system_egress_ip(),
         probe_doh(http_client, DohProvider::Cloudflare),
         probe_doh(http_client, DohProvider::Google),
         probe_captive_portal(),
     );
 
-    let dns_leak = classify_dns_leak(system_egress_ip.as_deref(), &[cloudflare_probe, google_probe]);
-    let encryption = wifi.as_ref().map(|w| w.encryption).unwrap_or(WifiEncryption::Unknown);
+    let dns_leak = classify_dns_leak(
+        system_egress_ip.as_deref(),
+        &[cloudflare_probe, google_probe],
+    );
+    let encryption = wifi
+        .as_ref()
+        .map(|w| w.encryption)
+        .unwrap_or(WifiEncryption::Unknown);
 
     let data = SecurityData {
         ssid: wifi.as_ref().map(|w| w.ssid.clone()),
@@ -310,7 +371,10 @@ pub async fn check_security<P: PlatformProbe>(
     let mut errors = Vec::new();
     let degraded = iface.is_some() && dns.is_none();
     if degraded {
-        errors.push(format!("Could not determine DNS servers for {}", iface.unwrap()));
+        errors.push(format!(
+            "Could not determine DNS servers for {}",
+            iface.unwrap()
+        ));
     }
 
     let mut findings = wifi_findings(encryption);
@@ -319,7 +383,11 @@ pub async fn check_security<P: PlatformProbe>(
 
     CheckResult {
         name: "security".to_string(),
-        status: if degraded { CheckStatus::Degraded } else { CheckStatus::Ok },
+        status: if degraded {
+            CheckStatus::Degraded
+        } else {
+            CheckStatus::Ok
+        },
         data: Some(data),
         errors,
         findings,
@@ -332,7 +400,11 @@ mod tests {
     use super::*;
 
     fn probe(provider: DohProvider, reachable: bool, egress_ip: Option<&str>) -> RawDohProbe {
-        RawDohProbe { provider, reachable, egress_ip: egress_ip.map(String::from) }
+        RawDohProbe {
+            provider,
+            reachable,
+            egress_ip: egress_ip.map(String::from),
+        }
     }
 
     // spec: dns-leak-detection#S1
@@ -354,7 +426,10 @@ mod tests {
     fn every_probe_unreachable_is_uncertain_never_clean() {
         let result = classify_dns_leak(
             Some("203.0.113.9"),
-            &[probe(DohProvider::Cloudflare, false, None), probe(DohProvider::Google, false, None)],
+            &[
+                probe(DohProvider::Cloudflare, false, None),
+                probe(DohProvider::Google, false, None),
+            ],
         );
         assert_eq!(result.verdict, DnsLeakVerdict::Uncertain);
         assert!(!result.leaked);
@@ -372,7 +447,11 @@ mod tests {
         );
         assert_eq!(result.verdict, DnsLeakVerdict::Leaked);
         assert!(result.leaked);
-        let cf = result.probes.iter().find(|p| p.provider == DohProvider::Cloudflare).unwrap();
+        let cf = result
+            .probes
+            .iter()
+            .find(|p| p.provider == DohProvider::Cloudflare)
+            .unwrap();
         assert_eq!(cf.egress_ip, Some("198.51.100.4".to_string()));
     }
 
@@ -381,10 +460,17 @@ mod tests {
     fn one_reachable_agreeing_probe_is_enough_for_clean() {
         let result = classify_dns_leak(
             Some("203.0.113.9"),
-            &[probe(DohProvider::Cloudflare, true, Some("203.0.113.4")), probe(DohProvider::Google, false, None)],
+            &[
+                probe(DohProvider::Cloudflare, true, Some("203.0.113.4")),
+                probe(DohProvider::Google, false, None),
+            ],
         );
         assert_eq!(result.verdict, DnsLeakVerdict::Clean);
-        let google = result.probes.iter().find(|p| p.provider == DohProvider::Google).unwrap();
+        let google = result
+            .probes
+            .iter()
+            .find(|p| p.provider == DohProvider::Google)
+            .unwrap();
         assert!(!google.reachable);
     }
 
@@ -394,7 +480,11 @@ mod tests {
         let result = classify_dns_leak(
             Some("203.0.113.9"),
             &[
-                probe(DohProvider::Cloudflare, true, Some("2607:f8b0:4004:1001::12e")),
+                probe(
+                    DohProvider::Cloudflare,
+                    true,
+                    Some("2607:f8b0:4004:1001::12e"),
+                ),
                 probe(DohProvider::Google, true, Some("203.0.113.4")),
             ],
         );
@@ -416,24 +506,39 @@ mod tests {
 
     #[test]
     fn no_system_egress_ip_is_uncertain() {
-        let result = classify_dns_leak(None, &[probe(DohProvider::Cloudflare, true, Some("203.0.113.4"))]);
+        let result = classify_dns_leak(
+            None,
+            &[probe(DohProvider::Cloudflare, true, Some("203.0.113.4"))],
+        );
         assert_eq!(result.verdict, DnsLeakVerdict::Uncertain);
     }
 
     // --- classify_captive_portal ---
 
     fn expect_204() -> CanaryExpectation {
-        CanaryExpectation { expected_status: 204, expected_body_contains: None }
+        CanaryExpectation {
+            expected_status: 204,
+            expected_body_contains: None,
+        }
     }
     fn expect_200_success() -> CanaryExpectation {
-        CanaryExpectation { expected_status: 200, expected_body_contains: Some("Success") }
+        CanaryExpectation {
+            expected_status: 200,
+            expected_body_contains: Some("Success"),
+        }
     }
 
     // spec: captive-portal-detection#S1
     #[test]
     fn unmodified_204_is_not_a_portal() {
-        let (detected, method, ..) =
-            classify_captive_portal(&CanaryResponse { status: Some(204), location: None, body: String::new() }, &expect_204());
+        let (detected, method, ..) = classify_captive_portal(
+            &CanaryResponse {
+                status: Some(204),
+                location: None,
+                body: String::new(),
+            },
+            &expect_204(),
+        );
         assert!(!detected);
         assert_eq!(method, CaptivePortalMethod::None);
     }
@@ -441,7 +546,11 @@ mod tests {
     #[test]
     fn unmodified_200_body_match_is_not_a_portal() {
         let (detected, method, ..) = classify_captive_portal(
-            &CanaryResponse { status: Some(200), location: None, body: "<HTML><BODY>Success</BODY></HTML>".to_string() },
+            &CanaryResponse {
+                status: Some(200),
+                location: None,
+                body: "<HTML><BODY>Success</BODY></HTML>".to_string(),
+            },
             &expect_200_success(),
         );
         assert!(!detected);
@@ -461,14 +570,21 @@ mod tests {
         );
         assert!(detected);
         assert_eq!(method, CaptivePortalMethod::Redirect);
-        assert_eq!(location, Some("http://portal.example.com/login".to_string()));
+        assert_eq!(
+            location,
+            Some("http://portal.example.com/login".to_string())
+        );
     }
 
     // spec: captive-portal-detection#S3
     #[test]
     fn expected_status_with_substituted_content_is_content_mismatch() {
         let (detected, method, ..) = classify_captive_portal(
-            &CanaryResponse { status: Some(200), location: None, body: "<HTML><BODY>Please log in</BODY></HTML>".to_string() },
+            &CanaryResponse {
+                status: Some(200),
+                location: None,
+                body: "<HTML><BODY>Please log in</BODY></HTML>".to_string(),
+            },
             &expect_200_success(),
         );
         assert!(detected);
@@ -477,8 +593,14 @@ mod tests {
 
     #[test]
     fn unreachable_canary_is_not_detected() {
-        let (detected, method, ..) =
-            classify_captive_portal(&CanaryResponse { status: None, location: None, body: String::new() }, &expect_204());
+        let (detected, method, ..) = classify_captive_portal(
+            &CanaryResponse {
+                status: None,
+                location: None,
+                body: String::new(),
+            },
+            &expect_204(),
+        );
         assert!(!detected);
         assert_eq!(method, CaptivePortalMethod::None);
     }

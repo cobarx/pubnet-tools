@@ -11,7 +11,7 @@
 //! call is cheap and worth covering without touching the network.
 
 use crate::network::stddev;
-use crate::types::{CheckStatus, CheckResult, Finding, Severity, SpeedData};
+use crate::types::{CheckResult, CheckStatus, Finding, Severity, SpeedData};
 use futures_util::{SinkExt, StreamExt};
 use rand::Rng;
 use std::time::{Duration, Instant};
@@ -49,7 +49,10 @@ pub async fn default_locate() -> Result<NdtServer, String> {
         .map(String::from);
 
     match (download_url, upload_url) {
-        (Some(d), Some(u)) => Ok(NdtServer { download_url: d, upload_url: u }),
+        (Some(d), Some(u)) => Ok(NdtServer {
+            download_url: d,
+            upload_url: u,
+        }),
         _ => Err("NDT7 locate API returned no usable server".to_string()),
     }
 }
@@ -79,14 +82,20 @@ struct DirectionResult {
     rtt_samples_ms: Vec<f64>,
 }
 
-async fn measure_direction(url: &str, mode: Mode, test_duration: Duration) -> Result<DirectionResult, String> {
+async fn measure_direction(
+    url: &str,
+    mode: Mode,
+    test_duration: Duration,
+) -> Result<DirectionResult, String> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(
         tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(url)
             .map_err(|e| e.to_string())
             .and_then(|mut req| {
                 req.headers_mut().insert(
                     "Sec-WebSocket-Protocol",
-                    NDT7_SUBPROTOCOL.parse().map_err(|_| "invalid subprotocol header".to_string())?,
+                    NDT7_SUBPROTOCOL
+                        .parse()
+                        .map_err(|_| "invalid subprotocol header".to_string())?,
                 );
                 Ok(req)
             })?,
@@ -140,7 +149,11 @@ async fn measure_direction(url: &str, mode: Mode, test_duration: Duration) -> Re
     }
 
     let _ = write.close().await;
-    Ok(DirectionResult { bytes_transferred: bytes, elapsed_ms: started_at.elapsed().as_millis() as u64, rtt_samples_ms: rtts })
+    Ok(DirectionResult {
+        bytes_transferred: bytes,
+        elapsed_ms: started_at.elapsed().as_millis() as u64,
+        rtt_samples_ms: rtts,
+    })
 }
 
 fn failed(start: Instant, message: String) -> CheckResult<SpeedData> {
@@ -172,10 +185,11 @@ where
         Err(e) => return failed(start, e),
     };
 
-    let download = match measure_direction(&server.download_url, Mode::Download, test_duration).await {
-        Ok(d) => d,
-        Err(e) => return failed(start, e),
-    };
+    let download =
+        match measure_direction(&server.download_url, Mode::Download, test_duration).await {
+            Ok(d) => d,
+            Err(e) => return failed(start, e),
+        };
     let upload = match measure_direction(&server.upload_url, Mode::Upload, test_duration).await {
         Ok(u) => u,
         Err(e) => return failed(start, e),
@@ -187,7 +201,13 @@ where
     let data = SpeedData {
         download_mbps: mbps(download.bytes_transferred, download.elapsed_ms),
         upload_mbps: mbps(upload.bytes_transferred, upload.elapsed_ms),
-        latency_ms: rtts.iter().cloned().fold(None, |acc: Option<f64>, v| Some(acc.map_or(v, |a| a.min(v)))).unwrap_or(0.0),
+        latency_ms: rtts
+            .iter()
+            .cloned()
+            .fold(None, |acc: Option<f64>, v| {
+                Some(acc.map_or(v, |a| a.min(v)))
+            })
+            .unwrap_or(0.0),
         jitter_ms: if rtts.is_empty() { 0.0 } else { stddev(&rtts) },
         source: "ndt7".to_string(),
     };

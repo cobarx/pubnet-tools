@@ -1,14 +1,16 @@
 //! spec: reliability-check-resilience
 
-use crate::network::{stddev, PingSummary};
+use crate::network::{PingSummary, stddev};
 use crate::types::{
     CheckResult, CheckStatus, Finding, PingTargetLabel, PingTargetResult, ReliabilityData, Severity,
 };
 use std::future::Future;
 use std::time::Instant;
 
-const EXTERNAL_TARGETS: &[(&str, PingTargetLabel)] =
-    &[("8.8.8.8", PingTargetLabel::GoogleDns), ("1.1.1.1", PingTargetLabel::CloudflareDns)];
+const EXTERNAL_TARGETS: &[(&str, PingTargetLabel)] = &[
+    ("8.8.8.8", PingTargetLabel::GoogleDns),
+    ("1.1.1.1", PingTargetLabel::CloudflareDns),
+];
 
 const PING_COUNT: u32 = 10;
 
@@ -28,7 +30,11 @@ pub async fn system_ping(host: String) -> PingSummary {
         let count = PING_COUNT.to_string();
         match exec_cmd(cmd(&["ping", "-c", &count, "-i", "0.2", &host])).await {
             Ok(r) => crate::network::parse_ping_output(&r.stdout),
-            Err(_) => PingSummary { transmitted: 0, received: 0, rtts: Vec::new() },
+            Err(_) => PingSummary {
+                transmitted: 0,
+                received: 0,
+                rtts: Vec::new(),
+            },
         }
     }
 }
@@ -53,18 +59,30 @@ where
         transmitted: summary.transmitted,
         received: summary.received,
         packet_loss_pct,
-        min_ms: summary.rtts.iter().cloned().fold(None, |acc: Option<f64>, v| {
-            Some(acc.map_or(v, |a| a.min(v)))
-        }),
+        min_ms: summary
+            .rtts
+            .iter()
+            .cloned()
+            .fold(None, |acc: Option<f64>, v| {
+                Some(acc.map_or(v, |a| a.min(v)))
+            }),
         avg_ms: if summary.rtts.is_empty() {
             None
         } else {
             Some(summary.rtts.iter().sum::<f64>() / summary.rtts.len() as f64)
         },
-        max_ms: summary.rtts.iter().cloned().fold(None, |acc: Option<f64>, v| {
-            Some(acc.map_or(v, |a| a.max(v)))
-        }),
-        jitter_ms: if summary.rtts.is_empty() { None } else { Some(stddev(&summary.rtts)) },
+        max_ms: summary
+            .rtts
+            .iter()
+            .cloned()
+            .fold(None, |acc: Option<f64>, v| {
+                Some(acc.map_or(v, |a| a.max(v)))
+            }),
+        jitter_ms: if summary.rtts.is_empty() {
+            None
+        } else {
+            Some(stddev(&summary.rtts))
+        },
         rtts: summary.rtts,
         reachable,
     }
@@ -73,7 +91,9 @@ where
 fn findings_for(targets: &[PingTargetResult]) -> Vec<Finding> {
     let mut findings = Vec::new();
     let gateway = targets.iter().find(|t| t.label == PingTargetLabel::Gateway);
-    let internet_up = targets.iter().any(|t| t.label != PingTargetLabel::Gateway && t.reachable);
+    let internet_up = targets
+        .iter()
+        .any(|t| t.label != PingTargetLabel::Gateway && t.reachable);
 
     if let Some(g) = gateway
         && !g.reachable
@@ -157,25 +177,43 @@ where
             name: "reliability".to_string(),
             status: CheckStatus::Skipped,
             data: None,
-            errors: vec!["No gateway IP available (topology check found no default route)".to_string()],
+            errors: vec![
+                "No gateway IP available (topology check found no default route)".to_string(),
+            ],
             findings: vec![],
             duration_ms: start.elapsed().as_millis() as u64,
         };
     };
 
     let mut futures = vec![ping_target(ping, gateway_ip, PingTargetLabel::Gateway)];
-    for (host, label) in EXTERNAL_TARGETS.iter().filter(|(_, l)| !exclude.contains(l)) {
+    for (host, label) in EXTERNAL_TARGETS
+        .iter()
+        .filter(|(_, l)| !exclude.contains(l))
+    {
         futures.push(ping_target(ping, host, *label));
     }
     let targets = futures_util::future::join_all(futures).await;
 
-    let gateway_reachable =
-        targets.iter().find(|t| t.label == PingTargetLabel::Gateway).map(|t| t.reachable).unwrap_or(false);
-    let internet_reachable = targets.iter().any(|t| t.label != PingTargetLabel::Gateway && t.reachable);
+    let gateway_reachable = targets
+        .iter()
+        .find(|t| t.label == PingTargetLabel::Gateway)
+        .map(|t| t.reachable)
+        .unwrap_or(false);
+    let internet_reachable = targets
+        .iter()
+        .any(|t| t.label != PingTargetLabel::Gateway && t.reachable);
 
     let findings = findings_for(&targets);
-    let data = ReliabilityData { targets, gateway_reachable, internet_reachable };
-    let status = if gateway_reachable && internet_reachable { CheckStatus::Ok } else { CheckStatus::Degraded };
+    let data = ReliabilityData {
+        targets,
+        gateway_reachable,
+        internet_reachable,
+    };
+    let status = if gateway_reachable && internet_reachable {
+        CheckStatus::Ok
+    } else {
+        CheckStatus::Degraded
+    };
 
     CheckResult {
         name: "reliability".to_string(),
@@ -190,15 +228,23 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn summary(transmitted: u32, received: u32, rtts: &[f64]) -> PingSummary {
-        PingSummary { transmitted, received, rtts: rtts.to_vec() }
+        PingSummary {
+            transmitted,
+            received,
+            rtts: rtts.to_vec(),
+        }
     }
 
     fn reachable() -> PingSummary {
-        summary(10, 10, &[10.0, 12.0, 11.0, 9.0, 10.0, 11.0, 10.0, 12.0, 9.0, 11.0])
+        summary(
+            10,
+            10,
+            &[10.0, 12.0, 11.0, 9.0, 10.0, 11.0, 10.0, 12.0, 9.0, 11.0],
+        )
     }
 
     fn unreachable() -> PingSummary {
@@ -244,7 +290,11 @@ mod tests {
     #[tokio::test]
     async fn gateway_down_internet_up_is_degraded_not_aborted() {
         let ping = |host: String| async move {
-            if host == "192.168.5.1" { unreachable() } else { reachable() }
+            if host == "192.168.5.1" {
+                unreachable()
+            } else {
+                reachable()
+            }
         };
 
         let result = check_reliability(Some("192.168.5.1"), &ping, &[]).await;
@@ -254,7 +304,11 @@ mod tests {
         assert!(!data.gateway_reachable);
         assert!(data.internet_reachable);
         assert_eq!(data.targets.len(), 3);
-        let gateway_target = data.targets.iter().find(|t| t.label == PingTargetLabel::Gateway).unwrap();
+        let gateway_target = data
+            .targets
+            .iter()
+            .find(|t| t.label == PingTargetLabel::Gateway)
+            .unwrap();
         assert_eq!(gateway_target.packet_loss_pct, 100.0);
         assert!(!gateway_target.reachable);
     }
@@ -285,23 +339,41 @@ mod tests {
             async { reachable() }
         };
 
-        let result = check_reliability(Some("192.168.5.1"), &ping, &[PingTargetLabel::GoogleDns]).await;
+        let result =
+            check_reliability(Some("192.168.5.1"), &ping, &[PingTargetLabel::GoogleDns]).await;
 
         let data = result.data.unwrap();
         assert_eq!(data.targets.len(), 2);
-        assert!(!data.targets.iter().any(|t| t.label == PingTargetLabel::GoogleDns));
-        assert!(data.targets.iter().any(|t| t.label == PingTargetLabel::CloudflareDns));
+        assert!(
+            !data
+                .targets
+                .iter()
+                .any(|t| t.label == PingTargetLabel::GoogleDns)
+        );
+        assert!(
+            data.targets
+                .iter()
+                .any(|t| t.label == PingTargetLabel::CloudflareDns)
+        );
         assert!(!calls.lock().unwrap().contains(&"8.8.8.8".to_string()));
     }
 
     #[tokio::test]
     async fn internet_reachable_reflects_only_the_remaining_external_target() {
         let ping = |host: String| async move {
-            if host == "1.1.1.1" { unreachable() } else { reachable() }
+            if host == "1.1.1.1" {
+                unreachable()
+            } else {
+                reachable()
+            }
         };
 
-        let result =
-            check_reliability(Some("192.168.5.1"), &ping, &[PingTargetLabel::CloudflareDns]).await;
+        let result = check_reliability(
+            Some("192.168.5.1"),
+            &ping,
+            &[PingTargetLabel::CloudflareDns],
+        )
+        .await;
 
         let data = result.data.unwrap();
         assert_eq!(data.targets.len(), 2);

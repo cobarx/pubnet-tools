@@ -1,0 +1,5 @@
+# Pin the formatting style so `cargo fmt` produces identical output across
+# rustfmt versions — without this, a rustfmt upgrade can silently change
+# wrapping/heuristics within the same language edition. Matches Cargo.toml's
+# `edition = "2024"`. Requires rustfmt from Rust 1.85+ (stable `style_edition`).
+style_edition = "2024"

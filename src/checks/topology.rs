@@ -31,10 +31,16 @@ pub async fn check_topology<P: PlatformProbe>(probe: &P) -> CheckResult<Topology
 
     let mut errors = Vec::new();
     if addr.is_none() {
-        errors.push(format!("Could not determine IP address for {}", route.device));
+        errors.push(format!(
+            "Could not determine IP address for {}",
+            route.device
+        ));
     }
 
-    let ip_cidr = addr.as_ref().map(|a| format!("{}/{}", a.ip, a.prefix)).unwrap_or_default();
+    let ip_cidr = addr
+        .as_ref()
+        .map(|a| format!("{}/{}", a.ip, a.prefix))
+        .unwrap_or_default();
 
     let data = TopologyData {
         interface: route.device,
@@ -47,7 +53,11 @@ pub async fn check_topology<P: PlatformProbe>(probe: &P) -> CheckResult<Topology
 
     CheckResult {
         name: "topology".to_string(),
-        status: if addr.is_some() { CheckStatus::Ok } else { CheckStatus::Degraded },
+        status: if addr.is_some() {
+            CheckStatus::Ok
+        } else {
+            CheckStatus::Degraded
+        },
         data: Some(data),
         errors,
         findings: vec![],
@@ -58,7 +68,7 @@ pub async fn check_topology<P: PlatformProbe>(probe: &P) -> CheckResult<Topology
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::{AddrInfo, RouteInfo, WifiInfo, PlatformProbe};
+    use crate::platform::{AddrInfo, PlatformProbe, RouteInfo, WifiInfo};
     use crate::types::{ArpNeighbor, DnsResolverInfo, InterfaceKind};
 
     struct MockProbe {
@@ -68,13 +78,27 @@ mod tests {
     }
 
     impl PlatformProbe for MockProbe {
-        async fn default_route(&self) -> Option<RouteInfo> { self.route.clone() }
-        async fn interface_addr(&self, _: &str) -> Option<AddrInfo> { self.addr.clone() }
-        async fn arp_neighbors(&self, _: &str, _: Option<&str>) -> Vec<ArpNeighbor> { self.neighbors.clone() }
-        async fn wifi_info(&self) -> Option<WifiInfo> { None }
-        async fn dns_info(&self, _: &str) -> Option<DnsResolverInfo> { None }
-        async fn system_egress_ip(&self) -> Option<String> { None }
-        async fn interface_type(&self, _: &str) -> InterfaceKind { InterfaceKind::Ethernet }
+        async fn default_route(&self) -> Option<RouteInfo> {
+            self.route.clone()
+        }
+        async fn interface_addr(&self, _: &str) -> Option<AddrInfo> {
+            self.addr.clone()
+        }
+        async fn arp_neighbors(&self, _: &str, _: Option<&str>) -> Vec<ArpNeighbor> {
+            self.neighbors.clone()
+        }
+        async fn wifi_info(&self) -> Option<WifiInfo> {
+            None
+        }
+        async fn dns_info(&self, _: &str) -> Option<DnsResolverInfo> {
+            None
+        }
+        async fn system_egress_ip(&self) -> Option<String> {
+            None
+        }
+        async fn interface_type(&self, _: &str) -> InterfaceKind {
+            InterfaceKind::Ethernet
+        }
     }
 
     fn gateway_neighbor() -> ArpNeighbor {
@@ -91,7 +115,11 @@ mod tests {
     // spec: topology-default-route-precondition#S2
     #[tokio::test]
     async fn no_default_route_is_skipped() {
-        let probe = MockProbe { route: None, addr: None, neighbors: vec![] };
+        let probe = MockProbe {
+            route: None,
+            addr: None,
+            neighbors: vec![],
+        };
         let result = check_topology(&probe).await;
         assert_eq!(result.status, CheckStatus::Skipped);
         assert!(result.data.is_none());
@@ -101,8 +129,14 @@ mod tests {
     #[tokio::test]
     async fn default_route_drives_addr_and_neigh_lookups() {
         let probe = MockProbe {
-            route: Some(RouteInfo { gateway: "192.168.5.1".to_string(), device: "wlan0".to_string() }),
-            addr: Some(AddrInfo { ip: "192.168.5.151".to_string(), prefix: 24 }),
+            route: Some(RouteInfo {
+                gateway: "192.168.5.1".to_string(),
+                device: "wlan0".to_string(),
+            }),
+            addr: Some(AddrInfo {
+                ip: "192.168.5.151".to_string(),
+                prefix: 24,
+            }),
             neighbors: vec![gateway_neighbor()],
         };
         let result = check_topology(&probe).await;
@@ -114,13 +148,19 @@ mod tests {
         assert_eq!(data.neighbors.len(), 1);
         assert!(data.neighbors[0].is_gateway);
         assert_eq!(data.neighbors[0].vendor, Some("TP-Link".to_string()));
-        assert_eq!(data.passive_notice, "Passive ARP cache — no active scan performed.");
+        assert_eq!(
+            data.passive_notice,
+            "Passive ARP cache — no active scan performed."
+        );
     }
 
     #[tokio::test]
     async fn route_found_but_addr_missing_is_degraded() {
         let probe = MockProbe {
-            route: Some(RouteInfo { gateway: "192.168.5.1".to_string(), device: "wlan0".to_string() }),
+            route: Some(RouteInfo {
+                gateway: "192.168.5.1".to_string(),
+                device: "wlan0".to_string(),
+            }),
             addr: None,
             neighbors: vec![],
         };

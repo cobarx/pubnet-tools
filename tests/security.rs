@@ -38,7 +38,9 @@ async fn produces_full_security_data_from_real_probes() {
     assert_eq!(data.dns_leak.probes.len(), 2);
     assert!(matches!(
         data.captive_portal.method,
-        CaptivePortalMethod::Redirect | CaptivePortalMethod::ContentMismatch | CaptivePortalMethod::None
+        CaptivePortalMethod::Redirect
+            | CaptivePortalMethod::ContentMismatch
+            | CaptivePortalMethod::None
     ));
     assert!(!data.captive_portal.canary_url.is_empty());
 }
