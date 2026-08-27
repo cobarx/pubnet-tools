@@ -148,8 +148,17 @@ Every FFI call, pointer dereference, linked-list walk, union field read, and
   prefix lengths against `0..=32`, channel against `1..=196`, and every returned blob's
   size against `size_of::<T>()` before it is dereferenced.
 
-Enum/byte mappings and the validators are unit-tested; the pointer-walking itself is
-only exercisable by the contract tests on a real machine.
+- **Compile-time layout checks** — a `const _: ()` block asserts the size/alignment
+  properties the `unsafe` depends on (`SOCKADDR_IN` is 16 bytes so the `read_unaligned`
+  is in bounds; `ICMP_ECHO_REPLY` align ≤ 8 so the `[u64]` buffer is enough;
+  `NET_LUID_LH` is 8 bytes). A `windows-sys` bump that moved a struct stops the build
+  rather than reading the wrong bytes.
+
+Enum/byte mappings and the validators are unit-tested. The one thing static checks
+*can't* catch — `windows-sys` putting a field at the wrong offset, yielding a
+plausible-but-wrong value — is caught by the topology contract test's new cross-field
+invariant: on a WiFi/Ethernet link the gateway must be on the interface's own subnet
+(`network::ipv4_in_cidr`), which a mis-read `NextHop` or address/prefix would violate.
 
 ## Consequences
 
