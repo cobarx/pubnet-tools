@@ -1,0 +1,23 @@
+[package]
+name = "pubnet-platform"
+version = "0.1.0"
+edition = "2024"
+description = "Shared platform probes and types for pubnet-tools binaries."
+
+[dependencies]
+regex = "1.13.1"
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "process", "fs"] }
+
+# Windows probes call the Win32 API directly (IP Helper + WLAN + ICMP) rather
+# than shelling out to PowerShell/netsh/ping.exe — see
+# docs/decisions/2026-08-28-windows-probes-via-win32-api.md. Windows-only.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_IO",
+    "Win32_Networking_WinSock",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_WiFi",
+] }

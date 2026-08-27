@@ -34,30 +34,44 @@ Non-root everywhere — nothing in `pubnetchk` requests elevated privileges.
 
 ## Architecture
 
+Cargo workspace with three crates:
+
 ```
-pubnet-tools
-  ├── src/main.rs         captures local UTC offset (pre-runtime), builds the tokio runtime, calls cli::run()
-  ├── src/lib.rs          module declarations only
-  ├── src/cli.rs          clap setup, orchestrates checks, manages the shared spinner
-  ├── src/types.rs        all structs and enums, serde derives, CheckResult<T> — no logic
-  ├── src/scoring.rs      pure function: &[ScorableResult] → { total, level, findings }
-  ├── src/exec.rs         tokio process wrapper, array argv (no shell), never Errs on non-zero exit
-  ├── src/network.rs      pure synchronous parsers + classification helpers for command output
-  ├── src/checks/
-  │   ├── topology.rs     default route → interface → addr/neigh; passive only; seeds gateway
-  │   ├── security.rs     WiFi info + DNS servers + DoH probes + captive portal (reqwest)
-  │   ├── reliability.rs  ping ×10, join_all over targets, per-packet RTT parsing
-  │   └── speed.rs        NDT7 (M-Lab) client over tokio-tungstenite, hand-rolled protocol
-  ├── src/output/
-  │   ├── renderer.rs     console only, condensed Network/Security/Performance sections, never calls network
-  │   └── reporter.rs     writes JSON to ~/.pubnetchk/reports/<timestamp>.json (only with --save)
-  └── src/platform/
-      ├── mod.rs          PlatformProbe trait + shared types (RouteInfo, AddrInfo, WifiInfo)
-      ├── linux.rs        ip / nmcli / resolvectl
-      ├── macos.rs        route / ifconfig / arp / scutil / ipconfig getsummary (fast Wi-Fi)
-      │                   / system_profiler -json (slow Wi-Fi: channel+signal) (+ inline parsers)
-      └── windows.rs      Win32 API via windows-sys: GetAdaptersAddresses / GetBestRoute2 /
-                          GetIpNetTable2 / WLAN API / IcmpSendEcho2 — no shelling out
+pubnet-tools/
+  Cargo.toml               workspace manifest + shared [profile.release]
+  crates/
+    pubnet-platform/       shared OS-abstraction library (no binary)
+      src/
+        exec.rs            tokio process wrapper, array argv (no shell), never Errs on non-zero exit
+        network.rs         pure synchronous parsers + classification helpers for command output
+        types.rs           platform-shared types: WifiEncryption, ArpNeighbor, DnsResolverInfo, etc.
+        platform/
+          mod.rs           PlatformProbe trait + shared types (RouteInfo, AddrInfo, WifiInfo)
+          linux.rs         ip / nmcli / resolvectl
+          macos.rs         route / ifconfig / arp / scutil / ipconfig getsummary (fast Wi-Fi)
+          │                / system_profiler -json (slow Wi-Fi: channel+signal) (+ inline parsers)
+          windows.rs       Win32 API via windows-sys: GetAdaptersAddresses / GetBestRoute2 /
+                           GetIpNetTable2 / WLAN API / IcmpSendEcho2 — no shelling out
+    pubnetchk/             pubnetchk binary (crate name: pubnet-tools)
+      src/
+        main.rs            captures local UTC offset (pre-runtime), builds the tokio runtime, calls cli::run()
+        lib.rs             re-exports pubnet-platform::{exec, network, platform}; declares own modules
+        cli.rs             clap setup, orchestrates checks, manages the shared spinner
+        types.rs           pubnetchk-only types (CheckResult<T>, Finding, SecurityData, …) +
+                           re-exports pubnet_platform::types for backwards-compat imports
+        scoring.rs         pure function: &[ScorableResult] → { total, level, findings }
+        checks/
+          topology.rs      default route → interface → addr/neigh; passive only; seeds gateway
+          security.rs      WiFi info + DNS servers + DoH probes + captive portal (reqwest)
+          reliability.rs   ping ×10, join_all over targets, per-packet RTT parsing
+          speed.rs         NDT7 (M-Lab) client over tokio-tungstenite, hand-rolled protocol
+        output/
+          renderer.rs      console only, condensed Network/Security/Performance sections, never calls network
+          reporter.rs      writes JSON to ~/.pubnetchk/reports/<timestamp>.json (only with --save)
+      tests/               contract tests (one real system boundary each, no mocks)
+        fixtures/          empirical captures; capture.sh adds new environments
+    pubnetdiag/            pubnetdiag binary — Wi-Fi AP scanner (stub; see epic #14)
+      src/main.rs
 ```
 
 **Data flow:** topology runs first and yields `gateway` + `interface`. Security,
@@ -70,7 +84,7 @@ or `skipped`. Callers inspect `status` and `errors`, never propagate a panic out
 check. Only a genuine spawn failure (binary not found) surfaces as an `Err` from
 `exec.rs`, and it's caught at the check level.
 
-**`PlatformProbe`** (`src/platform/mod.rs`) is the OS-abstraction seam: seven async
+**`PlatformProbe`** (`crates/pubnet-platform/src/platform/mod.rs`) is the OS-abstraction seam: seven async
 methods (`default_route`, `interface_addr`, `arp_neighbors`, `wifi_info`, `dns_info`,
 `system_egress_ip`, `interface_type`) returning common types. Checks call probe
 methods — they never invoke a platform-specific binary directly. Adding an OS is one
@@ -89,8 +103,8 @@ cargo build --release       # target/release/pubnetchk (~2.8–5 MB)
 cargo test --lib            # unit tests — fast, no network
 cargo test                 # + contract tests: hit real commands and real endpoints (need live network)
 cargo clippy --all-targets
-cargo run -- --json | jq .  # JSON mode
-cargo run -- --no-speed     # skip a check while iterating
+cargo run -p pubnet-tools -- --json | jq .  # JSON mode
+cargo run -p pubnet-tools -- --no-speed     # skip a check while iterating
 ```
 
 **Windows toolchain.** The default `x86_64-pc-windows-msvc` target needs the Visual
@@ -102,7 +116,7 @@ rustup override set stable-x86_64-pc-windows-gnu    # machine-local; do NOT comm
 scoop install mingw                                  # dlltool.exe on PATH — needed to link windows-sys and for --release
 ```
 
-`windows-sys` is a `[target.'cfg(windows)'.dependencies]` entry — it never touches the
+`windows-sys` is a `[target.'cfg(windows)'.dependencies]` entry in `crates/pubnet-platform/Cargo.toml` — it never touches the
 Linux/macOS build. See
 [2026-08-28-windows-probes-via-win32-api.md](docs/decisions/2026-08-28-windows-probes-via-win32-api.md)
 (and the superseded [2026-08-27](docs/decisions/2026-08-27-windows-platform-support.md)
@@ -121,16 +135,16 @@ for the toolchain rationale).
   - *Unit* — inline `#[cfg(test)] mod tests` in the module. Everything is a pure
     function over a string/data fixture; almost nothing is mocked because almost
     nothing needs to be.
-  - *Contract* — `tests/*.rs` (`topology.rs`, `security.rs`, `reliability.rs`,
-    `speed.rs`). One real boundary: a real system command or a real network endpoint.
-    `#[cfg]`-selects the platform probe. No mocks.
+  - *Contract* — `crates/pubnetchk/tests/*.rs` (`topology.rs`, `security.rs`,
+    `reliability.rs`, `speed.rs`). One real boundary: a real system command or a real
+    network endpoint. `#[cfg]`-selects the platform probe. No mocks.
   - Contract tests **assert on shape, not exact values** — real networks vary. Check
     that `verdict` is one of the three valid strings, not that it equals `clean`.
 - **Empirical fixtures.** Any test input representing external-command output is a
   *real capture*, never hand-typed — see
   [the `empirical-fixtures` skill](~/Code/MetanoiaFramework/skills/empirical-fixtures/SKILL.md).
-  `tests/fixtures/capture.sh <context>` captures a new environment (Linux/macOS);
-  output is committed. `tests/fixtures/NEEDED.md` tracks gaps. Windows has no fixtures —
+  `crates/pubnetchk/tests/fixtures/capture.sh <context>` captures a new environment (Linux/macOS);
+  output is committed. `crates/pubnetchk/tests/fixtures/NEEDED.md` tracks gaps. Windows has no fixtures —
   its probes call the Win32 API and parse no command output, so its coverage is the
   contract tests plus pure mapping unit tests.
 - **Feature requests and known gaps are GitHub issues** (`gh issue`), not TODO comments
@@ -185,7 +199,7 @@ for the toolchain rationale).
   cite scenarios by `<slug>#S<n>` from tests
   - `topology-default-route-precondition`, `dns-leak-detection`,
     `captive-portal-detection`, `reliability-check-resilience`, `risk-scoring`,
-    `wifi-info-detection`
+    `wifi-info-detection`, `wifi-auth-protocol-detection`, `pubnetdiag-scan`
 - [docs/decisions/](docs/decisions/) — why key architectural and technology choices
   were made; read before changing a dependency, adding a check, or adding a platform
   - [2026-08-02-open-source-only.md](docs/decisions/2026-08-02-open-source-only.md) — MIT/Apache/ISC only; why Ookla and fast.com are excluded
@@ -210,3 +224,7 @@ for the toolchain rationale).
   - [dns-hardening.md](docs/context/dns-hardening.md) — what the DNS findings mean; how much TLS protects against a hostile resolver
   - [nat-traversal.md](docs/context/nat-traversal.md) — how Tailscale punches through NAT; DERP relay fallback
   - [tailscale-wireguard-handshake.md](docs/context/tailscale-wireguard-handshake.md) — WireGuard Noise_IKpsk2 handshake walkthrough
+  - [wpa3-driver-compatibility.md](docs/context/wpa3-driver-compatibility.md) — WPA3/SAE driver failure on Intel AC 9560 against AT&T transition-mode AP; motivating incident for `wifi-auth-protocol-detection`
+- [docs/epics/](docs/epics/) — epic + ticket breakdown for multi-PR features; source of truth for planned work
+  - [wifi-auth-protocol/epic.md](docs/epics/wifi-auth-protocol/epic.md) — Wi-Fi auth protocol detection (WPA2-PSK vs WPA3-SAE vs transition mode); **abandoned** — superseded by pubnetdiag
+  - [pubnetdiag/epic.md](docs/epics/pubnetdiag/epic.md) — Wi-Fi AP scanner binary (`pubnetdiag`); BSS scan + RSN IE parser + `--repair`; 4 tickets, 21 pts
