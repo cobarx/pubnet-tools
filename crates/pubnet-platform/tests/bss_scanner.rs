@@ -4,19 +4,19 @@
 
 #[cfg(target_os = "windows")]
 mod windows {
-    use pubnet_platform::platform::windows::WindowsProbe;
     use pubnet_platform::platform::PlatformProbe;
+    use pubnet_platform::platform::windows::WindowsProbe;
     use pubnet_platform::types::AuthMode;
 
     #[tokio::test]
     async fn scan_bss_list_returns_entries() {
         let probe = WindowsProbe;
+        let result = probe.scan_bss_list().await;
 
-        // spec: pubnetdiag-scan#S3 — None means no adapter or adapter disabled
-        let entries = probe
-            .scan_bss_list()
-            .await
-            .expect("expected a Wi-Fi adapter — is Wi-Fi enabled?");
+        // spec: pubnetdiag-scan#S3 — None means no adapter; Some([]) means
+        // adapter present but no APs. On a Wi-Fi-enabled machine we expect Some.
+        let entries = result.expect("expected Some — is Wi-Fi enabled?");
+
 
         assert!(
             !entries.is_empty(),

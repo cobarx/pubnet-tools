@@ -176,8 +176,8 @@ async fn main() {
 
     // --- scan-only path ---
 
-    // spec: pubnetdiag-scan#S4
     if entries.is_empty() {
+        // spec: pubnetdiag-scan#S4
         println!("No networks found.");
         std::process::exit(0);
     }
@@ -210,6 +210,7 @@ async fn main() {
     print_table(&displayed);
 
     if has_transition {
+        // spec: pubnetdiag-scan#S2
         println!();
         println!("{FINDING}");
         std::process::exit(1);
@@ -221,6 +222,7 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pubnet_platform::types::AuthMode;
 
     fn entry(ssid: Option<&str>, auth: AuthMode, signal: u32, connected: bool) -> BssEntry {
         BssEntry {
@@ -270,7 +272,8 @@ mod tests {
             entry(Some("Safe"), AuthMode::Psk, 90, false),
             entry(Some("Danger"), AuthMode::SaeTransition, 60, true),
         ];
-        assert!(entries.iter().any(|e| e.auth_mode == AuthMode::SaeTransition));
+        let has_transition = entries.iter().any(|e| e.auth_mode == AuthMode::SaeTransition);
+        assert!(has_transition);
     }
 
     #[test]
@@ -279,7 +282,8 @@ mod tests {
             entry(Some("A"), AuthMode::Psk, 80, false),
             entry(Some("B"), AuthMode::Sae, 70, false),
         ];
-        assert!(!entries.iter().any(|e| e.auth_mode == AuthMode::SaeTransition));
+        let has_transition = entries.iter().any(|e| e.auth_mode == AuthMode::SaeTransition);
+        assert!(!has_transition);
     }
 
     #[test]

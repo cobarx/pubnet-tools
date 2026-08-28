@@ -540,7 +540,8 @@ fn format_bssid(mac: &[u8; 6]) -> String {
 }
 
 /// Blocking BSS list scan. Opens its own WLAN handle so it can be called
-/// independently of `wlan_info`.
+/// independently of `wlan_info`. Returns `None` when no WLAN adapter is found
+/// (maps to exit 2); `Some` once the adapter is confirmed (empty = no APs).
 fn wlan_scan_bss() -> Option<Vec<BssEntry>> {
     let mut raw: HANDLE = std::ptr::null_mut();
     let mut negotiated: u32 = 0;
@@ -950,10 +951,9 @@ impl PlatformProbe for WindowsProbe {
     }
 
     async fn scan_bss_list(&self) -> Option<Vec<BssEntry>> {
-        match tokio::task::spawn_blocking(wlan_scan_bss).await {
-            Ok(result) => result,
-            Err(_) => None,
-        }
+        tokio::task::spawn_blocking(wlan_scan_bss)
+            .await
+            .unwrap_or(None)
     }
 }
 
