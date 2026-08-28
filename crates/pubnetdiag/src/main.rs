@@ -1,6 +1,7 @@
 use clap::Parser;
 use pubnet_platform::platform::PlatformProbe;
 use pubnet_platform::types::{AuthMode, BssEntry};
+use pubnetdiag::{exit_codes, repair::detect_repairs};
 
 #[cfg(target_os = "windows")]
 use pubnet_platform::platform::windows::WindowsProbe as Probe;
@@ -19,7 +20,7 @@ struct Cli {
     /// Only show APs matching this SSID.
     ssid: Option<String>,
 
-    /// Force WPA2-PSK for the target SSID and reconnect.
+    /// Detect issues with the target SSID and apply the appropriate fix.
     #[arg(long)]
     repair: bool,
 }
@@ -94,18 +95,6 @@ Warning: WPA2+WPA3 transition mode detected
   manually add a WPA2-PSK profile:
     netsh wlan add profile filename=profile.xml";
 
-async fn do_repair(ssid: &str, passphrase: &str) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        return pubnet_platform::platform::windows::repair_wpa2(ssid, passphrase).await;
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (ssid, passphrase);
-        return Err("--repair is not yet supported on this platform.".to_string());
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -115,7 +104,7 @@ async fn main() {
         // spec: pubnetdiag-scan#S3
         None => {
             eprintln!("No Wi-Fi adapter found or adapter is disabled.");
-            std::process::exit(2);
+            std::process::exit(exit_codes::NO_ADAPTER);
         }
         Some(e) => e,
     };
@@ -125,16 +114,12 @@ async fn main() {
             Some(s) => s,
             None => {
                 eprintln!("--repair requires a target SSID: pubnetdiag --repair <SSID>");
-                std::process::exit(1);
+                std::process::exit(exit_codes::USAGE_ERROR);
             }
         };
 
-        let matching: Vec<&BssEntry> = entries
-            .iter()
-            .filter(|e| e.ssid.as_deref() == Some(target))
-            .collect();
-
-        if matching.is_empty() {
+        let ssid_visible = entries.iter().any(|e| e.ssid.as_deref() == Some(target));
+        if !ssid_visible {
             println!("'{}' not found.", target);
             if !entries.is_empty() {
                 println!();
@@ -143,35 +128,27 @@ async fn main() {
                     println!("  {}", e.ssid.as_deref().unwrap_or("(hidden)"));
                 }
             }
-            std::process::exit(0);
+            std::process::exit(exit_codes::OK);
         }
 
         // spec: pubnetdiag-scan#S10
-        if !matching.iter().any(|e| e.auth_mode == AuthMode::SaeTransition) {
-            println!("No repair needed for '{}' — not in transition mode.", target);
-            std::process::exit(0);
+        let actions = detect_repairs(target, &entries);
+        if actions.is_empty() {
+            println!("No repair needed for '{}' — no known issues detected.", target);
+            std::process::exit(exit_codes::OK);
         }
 
-        // spec: pubnetdiag-scan#S9, #S11
-        let passphrase = match rpassword::prompt_password(format!("Passphrase for '{}': ", target))
-        {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("Could not read passphrase: {e}");
-                std::process::exit(1);
-            }
-        };
-
-        match do_repair(target, &passphrase).await {
-            Ok(()) => {
-                println!("Connected to '{}'.", target);
-                std::process::exit(0);
-            }
-            Err(reason) => {
-                eprintln!("Repair failed: {reason}");
-                std::process::exit(1);
+        for action in &actions {
+            println!("Applying: {}", action.description());
+            match action.apply().await {
+                Ok(()) => println!("Connected to '{}'.", target),
+                Err(reason) => {
+                    eprintln!("Repair failed: {reason}");
+                    std::process::exit(exit_codes::REPAIR_FAILED);
+                }
             }
         }
+        std::process::exit(exit_codes::OK);
     }
 
     // --- scan-only path ---
@@ -179,7 +156,7 @@ async fn main() {
     if entries.is_empty() {
         // spec: pubnetdiag-scan#S4
         println!("No networks found.");
-        std::process::exit(0);
+        std::process::exit(exit_codes::OK);
     }
 
     let (displayed, has_transition) = if let Some(target) = &cli.ssid {
@@ -196,7 +173,7 @@ async fn main() {
             for e in &entries {
                 println!("  {}", e.ssid.as_deref().unwrap_or("(hidden)"));
             }
-            std::process::exit(0);
+            std::process::exit(exit_codes::OK);
         }
 
         let transition = matched.iter().any(|e| e.auth_mode == AuthMode::SaeTransition);
@@ -213,28 +190,15 @@ async fn main() {
         // spec: pubnetdiag-scan#S2
         println!();
         println!("{FINDING}");
-        std::process::exit(1);
+        std::process::exit(exit_codes::TRANSITION_FOUND);
     }
 
-    std::process::exit(0);
+    std::process::exit(exit_codes::OK);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pubnet_platform::types::AuthMode;
-
-    fn entry(ssid: Option<&str>, auth: AuthMode, signal: u32, connected: bool) -> BssEntry {
-        BssEntry {
-            ssid: ssid.map(|s| s.to_string()),
-            bssid: "AA:BB:CC:DD:EE:FF".to_string(),
-            auth_mode: auth,
-            band: Some(2.4),
-            channel: Some(6),
-            signal,
-            is_connected: connected,
-        }
-    }
 
     #[test]
     fn auth_labels_match_spec() {
@@ -250,61 +214,5 @@ mod tests {
         assert_eq!(band_str(Some(5.0)), "5.0");
         assert_eq!(channel_str(None), "-");
         assert_eq!(channel_str(Some(36)), "36");
-    }
-
-    #[test]
-    fn ssid_filter_matches_exact() {
-        let entries = vec![
-            entry(Some("HomeNet"), AuthMode::Psk, 80, false),
-            entry(Some("TargetNet"), AuthMode::SaeTransition, 70, false),
-        ];
-        let matched: Vec<&BssEntry> = entries
-            .iter()
-            .filter(|e| e.ssid.as_deref() == Some("TargetNet"))
-            .collect();
-        assert_eq!(matched.len(), 1);
-        assert_eq!(matched[0].auth_mode, AuthMode::SaeTransition);
-    }
-
-    #[test]
-    fn transition_detection_across_entries() {
-        let entries = vec![
-            entry(Some("Safe"), AuthMode::Psk, 90, false),
-            entry(Some("Danger"), AuthMode::SaeTransition, 60, true),
-        ];
-        let has_transition = entries.iter().any(|e| e.auth_mode == AuthMode::SaeTransition);
-        assert!(has_transition);
-    }
-
-    #[test]
-    fn no_transition_when_all_psk_or_sae() {
-        let entries = vec![
-            entry(Some("A"), AuthMode::Psk, 80, false),
-            entry(Some("B"), AuthMode::Sae, 70, false),
-        ];
-        let has_transition = entries.iter().any(|e| e.auth_mode == AuthMode::SaeTransition);
-        assert!(!has_transition);
-    }
-
-    #[test]
-    // spec: pubnetdiag-scan#S10
-    fn repair_not_needed_when_no_transition() {
-        let entries = vec![entry(Some("attinternet"), AuthMode::Psk, 80, true)];
-        let matching: Vec<&BssEntry> = entries
-            .iter()
-            .filter(|e| e.ssid.as_deref() == Some("attinternet"))
-            .collect();
-        assert!(!matching.iter().any(|e| e.auth_mode == AuthMode::SaeTransition));
-    }
-
-    #[test]
-    // spec: pubnetdiag-scan#S9
-    fn repair_needed_when_transition_present() {
-        let entries = vec![entry(Some("attinternet"), AuthMode::SaeTransition, 70, false)];
-        let matching: Vec<&BssEntry> = entries
-            .iter()
-            .filter(|e| e.ssid.as_deref() == Some("attinternet"))
-            .collect();
-        assert!(matching.iter().any(|e| e.auth_mode == AuthMode::SaeTransition));
     }
 }

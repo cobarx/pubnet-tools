@@ -4,9 +4,17 @@ version = "0.1.0"
 edition = "2024"
 description = "Wi-Fi diagnostic tool — scans visible APs and flags WPA2+WPA3 transition-mode issues."
 
+[lib]
+name = "pubnetdiag"
+path = "src/lib.rs"
+
 [[bin]]
 name = "pubnetdiag"
 path = "src/main.rs"
+
+[[bin]]
+name = "gen_exit_codes"
+path = "src/bin/gen_exit_codes.rs"
 
 [dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
