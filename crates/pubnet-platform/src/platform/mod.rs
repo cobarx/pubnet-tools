@@ -82,6 +82,8 @@ pub trait PlatformProbe {
     async fn interface_type(&self, iface: &str) -> InterfaceKind;
 
     /// Enumerate all visible BSSs (access points) with RSN IE–derived auth
-    /// mode. Returns an empty Vec when WLAN is unavailable or unsupported.
-    async fn scan_bss_list(&self) -> Vec<BssEntry>;
+    /// mode. Returns `None` when no WLAN adapter is present or the WLAN API
+    /// is unavailable (maps to exit 2); `Some([])` when the adapter is present
+    /// but no APs are visible (exit 0).
+    async fn scan_bss_list(&self) -> Option<Vec<BssEntry>>;
 }
