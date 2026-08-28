@@ -25,9 +25,11 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
 };
 use windows_sys::Win32::NetworkManagement::WiFi::{
     DOT11_AUTH_ALGORITHM, WLAN_BSS_ENTRY, WLAN_BSS_LIST, WLAN_CONNECTION_ATTRIBUTES,
-    WLAN_INTERFACE_INFO_LIST, WlanCloseHandle, WlanEnumInterfaces, WlanFreeMemory,
-    WlanGetNetworkBssList, WlanOpenHandle, WlanQueryInterface, dot11_BSS_type_any,
-    wlan_intf_opcode_channel_number, wlan_intf_opcode_current_connection,
+    WLAN_CONNECTION_PARAMETERS, WLAN_INTERFACE_INFO_LIST, WlanCloseHandle, WlanConnect,
+    WlanDeleteProfile, WlanEnumInterfaces, WlanFreeMemory, WlanGetNetworkBssList, WlanOpenHandle,
+    WlanQueryInterface, WlanSetProfile, dot11_BSS_type_any, dot11_BSS_type_infrastructure,
+    wlan_connection_mode_profile, wlan_interface_state_connected, wlan_intf_opcode_channel_number,
+    wlan_intf_opcode_current_connection,
 };
 use windows_sys::Win32::Networking::WinSock::{
     AF_INET, IN_ADDR, IN_ADDR_0, SOCKADDR, SOCKADDR_IN, SOCKADDR_INET,
@@ -656,6 +658,159 @@ fn wlan_scan_bss() -> Option<Vec<BssEntry>> {
 }
 
 // ---------------------------------------------------------------------------
+// Repair (WPA2-PSK profile creation + WlanConnect)
+// ---------------------------------------------------------------------------
+
+// Per-user profile scope — no elevation required.
+const WLAN_PROFILE_USER: u32 = 2;
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn str_to_wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn build_wpa2_profile(ssid: &str, passphrase: &str) -> String {
+    let s = xml_escape(ssid);
+    let p = xml_escape(passphrase);
+    format!(
+        r#"<?xml version="1.0"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+  <name>{s}</name>
+  <SSIDConfig><SSID><name>{s}</name></SSID></SSIDConfig>
+  <connectionType>ESS</connectionType>
+  <connectionMode>auto</connectionMode>
+  <MSM><security>
+    <authEncryption>
+      <authentication>WPA2PSK</authentication>
+      <encryption>AES</encryption>
+      <useOneX>false</useOneX>
+    </authEncryption>
+    <sharedKey>
+      <keyType>passPhrase</keyType>
+      <protected>false</protected>
+      <keyMaterial>{p}</keyMaterial>
+    </sharedKey>
+  </security></MSM>
+  <MacRandomization xmlns="http://www.microsoft.com/networking/WLAN/profile/v3">
+    <enableRandomization>false</enableRandomization>
+  </MacRandomization>
+</WLANProfile>"#
+    )
+}
+
+fn wlan_repair_blocking(ssid: &str, passphrase: &str) -> Result<(), String> {
+    // Open handle
+    let mut raw: HANDLE = std::ptr::null_mut();
+    let mut negotiated: u32 = 0;
+    if unsafe { WlanOpenHandle(2, std::ptr::null(), &mut negotiated, &mut raw) } != NO_ERROR {
+        return Err("no WLAN adapter available".to_string());
+    }
+    let handle = WlanHandle(raw);
+
+    // Pick an interface (prefer connected)
+    let mut list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
+    if unsafe { WlanEnumInterfaces(handle.0, std::ptr::null(), &mut list) } != NO_ERROR
+        || list.is_null()
+    {
+        return Err("no WLAN interface found".to_string());
+    }
+    let list_mem = WlanMem(list as *mut _);
+    let l = unsafe { &*list };
+    let n = (l.dwNumberOfItems as usize).min(MAX_WLAN_INTERFACES);
+    let ifaces = unsafe { std::slice::from_raw_parts(l.InterfaceInfo.as_ptr(), n) };
+    let Some(iface) = ifaces.iter().find(|i| i.isState == 1).or_else(|| ifaces.first()) else {
+        return Err("no WLAN interface found".to_string());
+    };
+    let guid = iface.InterfaceGuid;
+    drop(list_mem);
+
+    // Install WPA2-PSK profile (user scope, overwrites existing)
+    let xml = build_wpa2_profile(ssid, passphrase);
+    let wide_xml = str_to_wide(&xml);
+    let mut reason_code: u32 = 0;
+    let ret = unsafe {
+        WlanSetProfile(
+            handle.0,
+            &guid,
+            WLAN_PROFILE_USER,
+            wide_xml.as_ptr(),
+            std::ptr::null(), // no all-user security descriptor for user-scope profiles
+            1,                // bOverwrite = TRUE
+            std::ptr::null(),
+            &mut reason_code,
+        )
+    };
+    if ret != NO_ERROR {
+        return Err(format!(
+            "could not create profile (error {ret}, reason code {reason_code})"
+        ));
+    }
+
+    // Initiate connection using the new profile
+    let wide_name = str_to_wide(ssid);
+    let params = WLAN_CONNECTION_PARAMETERS {
+        wlanConnectionMode: wlan_connection_mode_profile,
+        strProfile: wide_name.as_ptr(),
+        pDot11Ssid: std::ptr::null_mut(),
+        pDesiredBssidList: std::ptr::null_mut(),
+        dot11BssType: dot11_BSS_type_infrastructure,
+        dwFlags: 0,
+    };
+    let ret = unsafe { WlanConnect(handle.0, &guid, &params, std::ptr::null()) };
+    if ret != NO_ERROR {
+        // Remove the profile we just created before bailing
+        let wide_del = str_to_wide(ssid);
+        unsafe { WlanDeleteProfile(handle.0, &guid, wide_del.as_ptr(), std::ptr::null()) };
+        return Err(format!("could not initiate connection (error {ret})"));
+    }
+
+    // Poll for connected state — up to 15 seconds at 500 ms intervals
+    for _ in 0..30 {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        if let Some((mem, size)) =
+            wlan_query(handle.0, &guid, wlan_intf_opcode_current_connection)
+        {
+            if (size as usize) < std::mem::size_of::<WLAN_CONNECTION_ATTRIBUTES>() {
+                continue;
+            }
+            let conn = unsafe { &*(mem.0 as *const WLAN_CONNECTION_ATTRIBUTES) };
+            if conn.isState == wlan_interface_state_connected {
+                let ssid_len = (conn.wlanAssociationAttributes.dot11Ssid.uSSIDLength as usize)
+                    .min(conn.wlanAssociationAttributes.dot11Ssid.ucSSID.len());
+                let connected =
+                    String::from_utf8_lossy(&conn.wlanAssociationAttributes.dot11Ssid.ucSSID[..ssid_len]);
+                if connected == ssid {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    // Timed out — remove the profile we created
+    let wide_del = str_to_wide(ssid);
+    unsafe { WlanDeleteProfile(handle.0, &guid, wide_del.as_ptr(), std::ptr::null()) };
+    Err("connection timed out after 15 seconds".to_string())
+}
+
+/// Create a WPA2-PSK profile for `ssid` and connect. Blocks the current
+/// thread for up to ~15 s polling for the connected state. Cleans up the
+/// created profile on any failure after profile creation.
+pub async fn repair_wpa2(ssid: &str, passphrase: &str) -> Result<(), String> {
+    let ssid = ssid.to_string();
+    let passphrase = passphrase.to_string();
+    tokio::task::spawn_blocking(move || wlan_repair_blocking(&ssid, &passphrase))
+        .await
+        .unwrap_or_else(|_| Err("internal error in repair task".to_string()))
+}
+
+// ---------------------------------------------------------------------------
 // Probe
 // ---------------------------------------------------------------------------
 
@@ -919,5 +1074,38 @@ mod tests {
             format_bssid(&[0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e]),
             "00:1A:2B:3C:4D:5E"
         );
+    }
+
+    #[test]
+    fn xml_escape_handles_reserved_chars() {
+        assert_eq!(xml_escape("AT&T"), "AT&amp;T");
+        assert_eq!(xml_escape("<tag>"), "&lt;tag&gt;");
+        assert_eq!(xml_escape("a\"b"), "a&quot;b");
+        assert_eq!(xml_escape("it's"), "it&apos;s");
+        assert_eq!(xml_escape("normal"), "normal");
+    }
+
+    #[test]
+    fn wpa2_profile_contains_correct_auth_and_ssid() {
+        let xml = build_wpa2_profile("MyNetwork", "hunter2");
+        assert!(xml.contains("<name>MyNetwork</name>"));
+        assert!(xml.contains("<authentication>WPA2PSK</authentication>"));
+        assert!(xml.contains("<encryption>AES</encryption>"));
+        assert!(xml.contains("<keyMaterial>hunter2</keyMaterial>"));
+        assert!(xml.contains("<enableRandomization>false</enableRandomization>"));
+        assert!(xml.contains("<useOneX>false</useOneX>"));
+    }
+
+    #[test]
+    fn wpa2_profile_escapes_special_chars_in_ssid_and_passphrase() {
+        let xml = build_wpa2_profile("AT&T Fiber", "pass<word>&\"it's\"");
+        assert!(xml.contains("AT&amp;T Fiber"));
+        assert!(xml.contains("pass&lt;word&gt;&amp;&quot;it&apos;s&quot;"));
+    }
+
+    #[test]
+    fn str_to_wide_is_nul_terminated() {
+        let wide = str_to_wide("hi");
+        assert_eq!(wide, vec!['h' as u16, 'i' as u16, 0]);
     }
 }

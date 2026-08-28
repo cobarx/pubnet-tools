@@ -26,3 +26,7 @@ test-all:
 # Lint.
 clippy:
     cargo clippy --all-targets
+
+# Regenerate docs/exit-codes.md from exit_codes::TABLE in pubnetdiag.
+exit-codes-doc:
+    cargo run -q --bin gen_exit_codes > docs/exit-codes.md

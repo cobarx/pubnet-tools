@@ -17,6 +17,7 @@ mod windows {
         // adapter present but no APs. On a Wi-Fi-enabled machine we expect Some.
         let entries = result.expect("expected Some — is Wi-Fi enabled?");
 
+
         assert!(
             !entries.is_empty(),
             "expected at least one BSS entry — is Wi-Fi enabled?"

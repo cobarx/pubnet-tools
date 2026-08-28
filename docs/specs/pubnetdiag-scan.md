@@ -41,11 +41,16 @@ scan APIs not yet implemented; they are deferred to later releases.
 
 ## Exit codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Scan ran; nothing actionable found. With `--repair`: fix applied or not needed. |
-| 1 | Scan ran; action needed (transition-mode AP found). With `--repair`: fix failed. |
-| 2 | Scan could not run (no adapter, adapter disabled, API error). |
+Each code maps to exactly one condition. See `docs/exit-codes.md` (generated from
+`crates/pubnetdiag/src/exit_codes.rs` via `just exit-codes-doc`).
+
+| Code | Name | Meaning |
+|------|------|---------|
+| 0 | `OK` | Scan clean; no actionable issues. With `--repair`: fix applied or not needed. |
+| 1 | `TRANSITION_FOUND` | Transition-mode AP detected. Run `--repair <SSID>` to apply the WPA2-PSK workaround. |
+| 2 | `REPAIR_FAILED` | Repair failed: wrong passphrase, connection timed out, or WLAN API error. |
+| 3 | `NO_ADAPTER` | No Wi-Fi adapter found or the adapter is disabled. |
+| 4 | `USAGE_ERROR` | Invalid invocation (e.g. `--repair` without a target SSID). |
 
 ## Scenarios
 
