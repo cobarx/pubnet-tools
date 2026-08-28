@@ -2,7 +2,7 @@
 // every `crate::types::WifiEncryption` / `ArpNeighbor` / etc. reference
 // throughout this crate continues to resolve without changes.
 pub use pubnet_platform::types::{
-    ArpNeighbor, DnsResolverInfo, DnsSource, InterfaceKind, WifiEncryption,
+    ArpNeighbor, AuthMode, BssEntry, DnsResolverInfo, DnsSource, InterfaceKind, WifiEncryption,
 };
 
 use serde::{Deserialize, Serialize};

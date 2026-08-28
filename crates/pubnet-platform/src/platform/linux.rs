@@ -7,7 +7,7 @@ use crate::network::{
     extract_remote_ip, parse_ip_addr, parse_ip_neigh, parse_ip_route, parse_nmcli_wifi,
     parse_resolvectl_status,
 };
-use crate::types::{ArpNeighbor, DnsResolverInfo, InterfaceKind};
+use crate::types::{ArpNeighbor, BssEntry, DnsResolverInfo, InterfaceKind};
 
 fn empty() -> ExecResult {
     ExecResult {
@@ -99,5 +99,9 @@ impl PlatformProbe for LinuxProbe {
             return InterfaceKind::WiFi;
         }
         InterfaceKind::Ethernet
+    }
+
+    async fn scan_bss_list(&self) -> Vec<BssEntry> {
+        Vec::new()
     }
 }
