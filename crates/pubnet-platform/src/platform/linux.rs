@@ -101,7 +101,7 @@ impl PlatformProbe for LinuxProbe {
         InterfaceKind::Ethernet
     }
 
-    async fn scan_bss_list(&self) -> Vec<BssEntry> {
-        Vec::new()
+    async fn scan_bss_list(&self) -> Option<Vec<BssEntry>> {
+        None
     }
 }

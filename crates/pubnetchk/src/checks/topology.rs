@@ -99,8 +99,8 @@ mod tests {
         async fn interface_type(&self, _: &str) -> InterfaceKind {
             InterfaceKind::Ethernet
         }
-        async fn scan_bss_list(&self) -> Vec<BssEntry> {
-            Vec::new()
+        async fn scan_bss_list(&self) -> Option<Vec<BssEntry>> {
+            None
         }
     }
 

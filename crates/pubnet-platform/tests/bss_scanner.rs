@@ -4,17 +4,19 @@
 
 #[cfg(target_os = "windows")]
 mod windows {
-    use pubnet_platform::platform::windows::WindowsProbe;
     use pubnet_platform::platform::PlatformProbe;
+    use pubnet_platform::platform::windows::WindowsProbe;
     use pubnet_platform::types::AuthMode;
 
     #[tokio::test]
     async fn scan_bss_list_returns_entries() {
         let probe = WindowsProbe;
-        let entries = probe.scan_bss_list().await;
+        let result = probe.scan_bss_list().await;
 
-        // spec: pubnetdiag-scan#S3 — empty Vec is fine when WLAN is absent;
-        // but on a Wi-Fi-enabled machine this should not be empty.
+        // spec: pubnetdiag-scan#S3 — None means no adapter; Some([]) means
+        // adapter present but no APs. On a Wi-Fi-enabled machine we expect Some.
+        let entries = result.expect("expected Some — is Wi-Fi enabled?");
+
         assert!(
             !entries.is_empty(),
             "expected at least one BSS entry — is Wi-Fi enabled?"
