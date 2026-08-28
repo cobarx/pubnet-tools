@@ -538,12 +538,13 @@ fn format_bssid(mac: &[u8; 6]) -> String {
 }
 
 /// Blocking BSS list scan. Opens its own WLAN handle so it can be called
-/// independently of `wlan_info`.
-fn wlan_scan_bss() -> Vec<BssEntry> {
+/// independently of `wlan_info`. Returns `None` when no WLAN adapter is found
+/// (maps to exit 2); `Some` once the adapter is confirmed (empty = no APs).
+fn wlan_scan_bss() -> Option<Vec<BssEntry>> {
     let mut raw: HANDLE = std::ptr::null_mut();
     let mut negotiated: u32 = 0;
     if unsafe { WlanOpenHandle(2, std::ptr::null(), &mut negotiated, &mut raw) } != NO_ERROR {
-        return Vec::new();
+        return None; // wlansvc not running / no WLAN stack
     }
     let handle = WlanHandle(raw);
 
@@ -551,14 +552,14 @@ fn wlan_scan_bss() -> Vec<BssEntry> {
     if unsafe { WlanEnumInterfaces(handle.0, std::ptr::null(), &mut list) } != NO_ERROR
         || list.is_null()
     {
-        return Vec::new();
+        return None; // no WLAN interface
     }
     let list_mem = WlanMem(list as *mut _);
     let l = unsafe { &*list };
     let n = (l.dwNumberOfItems as usize).min(MAX_WLAN_INTERFACES);
     let ifaces = unsafe { std::slice::from_raw_parts(l.InterfaceInfo.as_ptr(), n) };
     let Some(iface) = ifaces.iter().find(|i| i.isState == 1).or_else(|| ifaces.first()) else {
-        return Vec::new();
+        return None; // no WLAN interface in the list
     };
     let guid = iface.InterfaceGuid;
 
@@ -593,7 +594,8 @@ fn wlan_scan_bss() -> Vec<BssEntry> {
         )
     };
     if ret != NO_ERROR || bss_list.is_null() {
-        return Vec::new();
+        // Adapter present but BSS query failed (e.g. adapter disabled mid-scan)
+        return Some(Vec::new());
     }
     let bss_mem = WlanMem(bss_list as *mut _);
 
@@ -650,7 +652,7 @@ fn wlan_scan_bss() -> Vec<BssEntry> {
     }
 
     drop(bss_mem);
-    results
+    Some(results)
 }
 
 // ---------------------------------------------------------------------------
@@ -793,10 +795,10 @@ impl PlatformProbe for WindowsProbe {
         }
     }
 
-    async fn scan_bss_list(&self) -> Vec<BssEntry> {
+    async fn scan_bss_list(&self) -> Option<Vec<BssEntry>> {
         tokio::task::spawn_blocking(wlan_scan_bss)
             .await
-            .unwrap_or_default()
+            .unwrap_or(None)
     }
 }
 
