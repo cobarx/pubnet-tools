@@ -5,7 +5,7 @@ ticket: 001
 slug: snapshot-probe
 type: feature
 points: 3
-status: todo
+status: in-review
 tracker_ref: tbd
 pr: none
 related: [android-host-snapshot]
