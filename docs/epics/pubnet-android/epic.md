@@ -107,7 +107,7 @@ Walking-skeleton points (1–5): `20`
   UniFFI + JSON-snapshot bridge (why not typed records or a callback probe),
   rust-android-gradle, Compose. Cross-references the Windows platform decision
   as the sibling "new platform" precedent.
-- `docs/decisions/2026-08-28-android-tls-rustls.md` — no app-accessible system
+- `docs/decisions/2026-08-30-android-tls-rustls.md` — no app-accessible system
   TLS on Android; feature-gated rustls for the Android crate only; desktop
   `cargo tree` stays `native-tls`.
 - (ticket 6) `docs/decisions/<date>-android-unprivileged-icmp.md` — datagram
