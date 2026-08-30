@@ -830,6 +830,7 @@ dependencies = [
  "indicatif",
  "pubnet-platform",
  "rand",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

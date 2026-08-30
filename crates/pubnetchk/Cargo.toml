@@ -15,6 +15,9 @@ console = "0.16.4"
 futures-util = "0.3.34"
 indicatif = "0.18.6"
 rand = "0.10.2"
+# `cli.rs` parses the asciinema version string with a regex. `regex` is also a
+# dependency of pubnet-platform, but Cargo does not hoist it into this crate.
+regex = "1.13.1"
 # No "http2" feature: every request we make (DoH GETs, captive-portal canaries,
 # the M-Lab locate lookup) is a simple HTTP/1.1 GET, and dropping h2 removes the
 # whole h2 subtree (~300KB off the binary). Cloudflare/Google DoH both serve over
