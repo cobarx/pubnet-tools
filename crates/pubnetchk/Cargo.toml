@@ -8,6 +8,20 @@ description = "Audit the public WiFi or network you just joined - security, spee
 name = "pubnetchk"
 path = "src/main.rs"
 
+[features]
+# TLS backend. Desktop builds (Linux/macOS/Windows) use the system provider via
+# native-tls — see docs/decisions/2026-08-28-android-tls-rustls.md and the
+# "no system-OpenSSL dependency" note in CLAUDE.md. The Android cdylib
+# (crates/pubnetchk-android) builds with `--no-default-features --features
+# tls-rustls`, because Android exposes no system TLS to an app.
+default = ["tls-native"]
+tls-native = ["reqwest/native-tls", "tokio-tungstenite/native-tls"]
+# reqwest 0.13's `rustls` feature = the aws-lc-rs crypto provider +
+# rustls-platform-verifier (the OS trust store; on Android needs a context,
+# wired in the android crate). tokio-tungstenite uses webpki bundled roots so
+# the WebSocket path needs no JNI context. See the decision doc.
+tls-rustls = ["reqwest/rustls", "tokio-tungstenite/rustls-tls-webpki-roots"]
+
 [dependencies]
 pubnet-platform = { path = "../pubnet-platform" }
 clap = { version = "4.6.6", features = ["derive"] }
@@ -21,13 +35,15 @@ regex = "1.13.1"
 # No "http2" feature: every request we make (DoH GETs, captive-portal canaries,
 # the M-Lab locate lookup) is a simple HTTP/1.1 GET, and dropping h2 removes the
 # whole h2 subtree (~300KB off the binary). Cloudflare/Google DoH both serve over
-# HTTP/1.1 fine.
-reqwest = { version = "0.13.4", default-features = false, features = ["native-tls", "json"] }
+# HTTP/1.1 fine. The TLS backend comes from the `tls-*` features above, not here.
+reqwest = { version = "0.13.4", default-features = false, features = ["json"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 time = { version = "0.3.55", features = ["formatting", "parsing", "local-offset"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "process", "fs"] }
-tokio-tungstenite = { version = "0.30.0", features = ["native-tls"] }
+# default features (connect, handshake) stay on; the TLS backend comes from the
+# `tls-*` features above.
+tokio-tungstenite = { version = "0.30.0" }
 
 [dev-dependencies]
 tempfile = "3.27.0"
