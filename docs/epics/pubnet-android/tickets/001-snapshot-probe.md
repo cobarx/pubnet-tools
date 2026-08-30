@@ -7,7 +7,7 @@ type: feature
 points: 3
 status: in-review
 tracker_ref: tbd
-pr: none
+pr: "26"
 related: [android-host-snapshot]
 ---
 
