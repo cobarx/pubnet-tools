@@ -1,0 +1,28 @@
+[package]
+name = "pubnetchk-android"
+version = "0.1.0"
+edition = "2024"
+description = "UniFFI bindings for the pubnetchk audit engine — Android front-end."
+publish = false
+
+[lib]
+name = "pubnetchk_android"
+# cdylib: the .so loaded by the Android app (and read by uniffi-bindgen in
+# library mode). lib: lets the host build run the unit tests below.
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+# `cargo run -p pubnetchk-android --bin uniffi-bindgen -- generate --library <.so>
+#  --language kotlin --out-dir <dir>` — see crates/pubnetchk-android/README.md.
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+pubnet-platform = { path = "../pubnet-platform" }
+# The audit engine, built with rustls (Android has no system TLS) — see
+# docs/decisions/2026-08-30-android-tls-rustls.md.
+pubnet-tools = { path = "../pubnetchk", default-features = false, features = ["tls-rustls"] }
+uniffi = { version = "0.29", features = ["cli"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }
