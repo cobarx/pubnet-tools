@@ -31,10 +31,14 @@ Non-root everywhere — nothing in `pubnetchk` requests elevated privileges.
 - **Windows:** the Win32 API directly (IP Helper + WLAN + `IcmpSendEcho2`) via
   `windows-sys` — no child processes, no PowerShell. Build with the GNU toolchain —
   see Development setup.
+- **Android** (in progress — see `docs/epics/pubnet-android/`): a Kotlin/Compose app
+  over the Rust engine via a UniFFI cdylib (`crates/pubnetchk-android`). Cannot shell
+  out — Kotlin gathers a `HostSnapshot` from framework APIs and `SnapshotProbe` answers
+  from it. Walking skeleton: topology + security only.
 
 ## Architecture
 
-Cargo workspace with three crates:
+Cargo workspace with four crates:
 
 ```
 pubnet-tools/
@@ -51,12 +55,16 @@ pubnet-tools/
           macos.rs         route / ifconfig / arp / scutil / ipconfig getsummary (fast Wi-Fi)
           │                / system_profiler -json (slow Wi-Fi: channel+signal) (+ inline parsers)
           windows.rs       Win32 API via windows-sys: GetAdaptersAddresses / GetBestRoute2 /
-                           GetIpNetTable2 / WLAN API / IcmpSendEcho2 — no shelling out
+          │                GetIpNetTable2 / WLAN API / IcmpSendEcho2 — no shelling out
+          snapshot.rs      SnapshotProbe: PlatformProbe answered from a HostSnapshot (no I/O);
+                           the seam the Android app drives — not #[cfg]-gated, also a test seam
     pubnetchk/             pubnetchk binary (crate name: pubnet-tools)
       src/
         main.rs            captures local UTC offset (pre-runtime), builds the tokio runtime, calls cli::run()
         lib.rs             re-exports pubnet-platform::{exec, network, platform}; declares own modules
-        cli.rs             clap setup, orchestrates checks, manages the shared spinner
+        audit.rs           run_audit_with_probe: the four checks against any PlatformProbe +
+                           the spinner + Report assembly. Platform-neutral (compiles for Android)
+        cli.rs             clap setup + desktop run/record entry points. #[cfg(not(target_os="android"))]
         types.rs           pubnetchk-only types (CheckResult<T>, Finding, SecurityData, …) +
                            re-exports pubnet_platform::types for backwards-compat imports
         scoring.rs         pure function: &[ScorableResult] → { total, level, findings }
@@ -72,7 +80,14 @@ pubnet-tools/
         fixtures/          empirical captures; capture.sh adds new environments
     pubnetdiag/            pubnetdiag binary — Wi-Fi AP scanner (stub; see epic #14)
       src/main.rs
+    pubnetchk-android/     UniFFI cdylib: run_audit_json(snapshot, options) -> Report JSON.
+      src/lib.rs           Rust half of the Android app; built with --features tls-rustls.
+                           See docs/epics/pubnet-android/. (android/ Gradle project: not yet built)
 ```
+
+TLS backend is a feature of the `pubnet-tools` crate — `tls-native` (default,
+desktop) vs `tls-rustls` (Android only). See
+[2026-08-30-android-tls-rustls.md](docs/decisions/2026-08-30-android-tls-rustls.md).
 
 **Data flow:** topology runs first and yields `gateway` + `interface`. Security,
 reliability, and speed then run concurrently (`tokio::join!`). scoring is a pure
@@ -84,13 +99,17 @@ or `skipped`. Callers inspect `status` and `errors`, never propagate a panic out
 check. Only a genuine spawn failure (binary not found) surfaces as an `Err` from
 `exec.rs`, and it's caught at the check level.
 
-**`PlatformProbe`** (`crates/pubnet-platform/src/platform/mod.rs`) is the OS-abstraction seam: seven async
+**`PlatformProbe`** (`crates/pubnet-platform/src/platform/mod.rs`) is the OS-abstraction seam: eight async
 methods (`default_route`, `interface_addr`, `arp_neighbors`, `wifi_info`, `dns_info`,
-`system_egress_ip`, `interface_type`) returning common types. Checks call probe
-methods — they never invoke a platform-specific binary directly. Adding an OS is one
-new file implementing the trait plus a `#[cfg(target_os = "…")]` arm in `cli.rs` and in
-the three contract tests. `system_egress_ip` returns `None` on macOS and Windows, so
-the DNS-interception verdict is `uncertain` there rather than `clean`/`leaked`.
+`system_egress_ip`, `interface_type`, `scan_bss_list`) returning common types. Checks
+call probe methods — they never invoke a platform-specific binary directly. Adding an
+OS is one new file implementing the trait plus a `#[cfg(target_os = "…")]` arm in
+`audit::run_audit` and in the contract tests. `system_egress_ip` returns `None` on
+macOS and Windows, so the DNS-interception verdict is `uncertain` there rather than
+`clean`/`leaked`. `SnapshotProbe` (`platform/snapshot.rs`) is a ninth, non-OS
+implementation: it answers from a `HostSnapshot` of pre-gathered facts (JSON, camelCase)
+with no I/O — the Android app cannot shell out, so it gathers the facts on the Kotlin
+side and hands them across. `system_egress_ip` is `None` there too.
 
 ## Development setup
 
@@ -229,6 +248,7 @@ for the toolchain rationale).
   - [2026-08-27-windows-platform-support.md](docs/decisions/2026-08-27-windows-platform-support.md) — GNU toolchain (still current); PowerShell probe mechanism (**superseded**)
   - [2026-08-28-windows-probes-via-win32-api.md](docs/decisions/2026-08-28-windows-probes-via-win32-api.md) — Windows probes call the Win32 API directly (`windows-sys`); no PowerShell/netsh/ping.exe; why the fixture corpus was dropped
   - [2026-08-26-macos-wifi-without-airport.md](docs/decisions/2026-08-26-macos-wifi-without-airport.md) — `airport` was removed in macOS 15/26; fast `ipconfig getsummary` (SSID+encryption) + opt-in slow `system_profiler` (channel+signal); SSID is Location-Services-gated
+  - [2026-08-30-android-app-architecture.md](docs/decisions/2026-08-30-android-app-architecture.md) — Android app = Rust engine + UniFFI cdylib; JSON-snapshot bridge (no `uniffi` type derives, no callback probe); `audit::run_audit_with_probe` split out of `cli.rs`
   - [2026-08-30-android-tls-rustls.md](docs/decisions/2026-08-30-android-tls-rustls.md) — TLS backend is a crate feature (`tls-native` default vs `tls-rustls`); only the Android cdylib uses rustls; desktop `cargo tree` unchanged
 - [docs/epics/](docs/epics/) — multi-ticket bodies of work: `<slug>/epic.md` + `tickets/NNN-*.md`
 - [docs/context/](docs/context/) — observed network behavior and domain background;

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/pubnetchk", "crates/pubnet-platform", "crates/pubnetdiag"]
+members = ["crates/pubnetchk", "crates/pubnet-platform", "crates/pubnetdiag", "crates/pubnetchk-android"]
 resolver = "2"
 
 [profile.release]

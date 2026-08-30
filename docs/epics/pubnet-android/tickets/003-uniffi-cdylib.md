@@ -5,7 +5,7 @@ ticket: 003
 slug: uniffi-cdylib
 type: feature
 points: 5
-status: todo
+status: in-review
 tracker_ref: tbd
 pr: none
 related: []
