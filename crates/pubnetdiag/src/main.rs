@@ -139,6 +139,7 @@ async fn main() {
         std::process::exit(exit_codes::OK);
     }
 
+
     if cli.repair {
         let target = match cli.ssid.as_deref() {
             Some(s) => s,

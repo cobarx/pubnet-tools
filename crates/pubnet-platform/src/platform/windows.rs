@@ -840,6 +840,7 @@ pub fn delete_wlan_profile(ssid: &str) -> Result<(), String> {
     }
 }
 
+
 /// Create a WPA2-PSK profile for `ssid` and connect. Blocks the current
 /// thread for up to ~15 s polling for the connected state. Cleans up the
 /// created profile on any failure after profile creation.
