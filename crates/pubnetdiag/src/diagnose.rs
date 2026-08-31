@@ -5,24 +5,27 @@ fn event_label(id: u32) -> &'static str {
         8001 => "connected",
         8002 => "connection failed",
         8003 => "disconnected",
-        11004 => "association failed",
-        11005 => "security complete / connected",
-        11006 => "connection canceled",
-        11010 => "security failure",
+        11004 => "security stopped",
+        11005 => "security succeeded",
+        11006 => "security failed",
+        11010 => "security started",
         _ => "wlan event",
     }
 }
 
 fn interpret_reason(code: u32) -> String {
     match code {
-        0x10001 => "unknown reason".to_string(),
-        0x10002 => "profile incompatible with network".to_string(),
+        // Common WLAN_REASON_CODE values
+        0x10001 => "unknown".to_string(),
+        0x10002 => "profile/network incompatible".to_string(),
         0x10005 => "network not visible".to_string(),
         0x1000E => "network not available".to_string(),
-        // KEY_MISMATCH: what the Intel AC 9560 reports when SAE handshake fails
-        // against a transition-mode AP ("bad password" in the UI).
-        0x10010 => "key mismatch — wrong passphrase, or auth protocol rejected by driver".to_string(),
+        // KEY_MISMATCH: what the Intel AC 9560 reports when SAE fails against a
+        // transition-mode AP — surfaces in the UI as "bad password".
+        0x10010 => "key mismatch (wrong passphrase or auth protocol rejected)".to_string(),
         0x10011 => "user did not respond to prompt".to_string(),
+        // 4-way handshake timeout (seen in event 11006 for PSK failures)
+        0x48005 => "4-way handshake timed out".to_string(),
         c => format!("0x{c:X}"),
     }
 }
@@ -73,23 +76,33 @@ pub fn run_diagnose(ssid: &str, entries: &[BssEntry]) {
         } else {
             for ev in &events {
                 let label = event_label(ev.event_id);
-                let reason_part = match ev.reason_code {
-                    Some(c) => format!(" — {}", interpret_reason(c)),
-                    None => String::new(),
-                };
-                println!("  {}  {:5}  {}{}", ev.timestamp, ev.event_id, label, reason_part);
+
+                // Prefer the human-readable hint; fall back to decoded reason code.
+                let detail = ev.hint.as_deref()
+                    .map(|h| format!(" — {h}"))
+                    .or_else(|| ev.reason_code.filter(|&c| c != 0).map(|c| format!(" — {}", interpret_reason(c))))
+                    .unwrap_or_default();
+
+                println!("  {}  {:5}  {}{}", ev.timestamp, ev.event_id, label, detail);
             }
 
-            let has_key_mismatch = events
-                .iter()
-                .any(|e| e.reason_code == Some(0x10010));
+            let has_psk_mismatch = events.iter().any(|e| {
+                e.hint.as_deref().map(|h| h.to_ascii_lowercase().contains("psk mismatch")).unwrap_or(false)
+                    || e.reason_code == Some(0x48005)
+                    || e.reason_code == Some(0x10010)
+            });
             let transition = bsses.iter().any(|e| e.auth_mode == AuthMode::SaeTransition);
-            if has_key_mismatch && transition {
+
+            if has_psk_mismatch && transition {
                 println!();
                 println!(
-                    "  Diagnosis: key-mismatch failures on a transition-mode AP match the\n\
-                     \x20  Intel AC 9560 v23 SAE bug. Run `pubnetdiag {ssid} --repair` to fix."
+                    "  Diagnosis: PSK mismatch on a transition-mode AP matches the Intel AC 9560\n\
+                     \x20  v23 SAE bug. Run `pubnetdiag {ssid} --repair` to force WPA2 and connect."
                 );
+            } else if has_psk_mismatch {
+                println!();
+                println!("  PSK mismatch detected — verify the passphrase is correct.");
+                println!("  If the AP broadcasts WPA2+WPA3 transition mode, `--repair` may help.");
             }
         }
     }

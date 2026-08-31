@@ -869,7 +869,11 @@ pub struct WlanEventRecord {
     /// SSID extracted from the event's EventData, if present.
     pub ssid: Option<String>,
     /// Numeric reason code from the event's EventData, if present.
+    /// May be absent if the event carries no code, or zero for success.
     pub reason_code: Option<u32>,
+    /// Human-readable diagnostic hint from the event (SecurityHint, ReasonText,
+    /// or FailureReason depending on the event type).
+    pub hint: Option<String>,
 }
 
 /// RAII guard for `EVT_HANDLE`.
@@ -974,10 +978,16 @@ fn render_event_xml(event: EVT_HANDLE) -> String {
     String::from_utf16_lossy(&buf[..len])
 }
 
-/// Extract a named `<Data Name="key">value</Data>` field from an event XML string.
+// Windows event XML uses single-quoted attributes: Name='SSID' not Name="SSID".
+// Both helpers try single quotes first (the common case), then double quotes as
+// a fallback so we're not broken if the format ever changes.
+
+/// Extract a named `<Data Name='key'>value</Data>` field.
 fn xml_data_field(xml: &str, key: &str) -> Option<String> {
-    let needle = format!("<Data Name=\"{key}\">");
-    let start = xml.find(&needle)? + needle.len();
+    let sq = format!("<Data Name='{key}'>");
+    let dq = format!("<Data Name=\"{key}\">");
+    let start = xml.find(sq.as_str()).map(|p| p + sq.len())
+        .or_else(|| xml.find(dq.as_str()).map(|p| p + dq.len()))?;
     let end = start + xml[start..].find("</Data>")?;
     Some(xml[start..end].to_string())
 }
@@ -991,12 +1001,29 @@ fn xml_element<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
     Some(&xml[start..end])
 }
 
-/// Extract an attribute value like `SystemTime="2026-08-30T..."` → `2026-08-30T...`.
+/// Extract an attribute value — handles both single and double quote delimiters.
 fn xml_attr_value<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
-    let needle = format!("{attr}=\"");
-    let start = xml.find(needle.as_str())? + needle.len();
-    let end = start + xml[start..].find('"')?;
+    let sq = format!("{attr}='");
+    let dq = format!("{attr}=\"");
+    let (start, close) = if let Some(p) = xml.find(sq.as_str()) {
+        (p + sq.len(), '\'')
+    } else if let Some(p) = xml.find(dq.as_str()) {
+        (p + dq.len(), '"')
+    } else {
+        return None;
+    };
+    let end = start + xml[start..].find(close)?;
     Some(&xml[start..end])
+}
+
+/// Parse a reason code that may be decimal ("163851") or hex-prefixed ("0x48005").
+fn parse_reason_code(s: &str) -> Option<u32> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u32::from_str_radix(hex, 16).ok()
+    } else {
+        s.parse().ok()
+    }
 }
 
 fn parse_wlan_event_xml(xml: &str, ssid_filter: &str) -> Option<WlanEventRecord> {
@@ -1010,7 +1037,7 @@ fn parse_wlan_event_xml(xml: &str, ssid_filter: &str) -> Option<WlanEventRecord>
         .unwrap_or(raw_ts)
         .replace('T', " ");
 
-    // SSID appears under different field names depending on the event.
+    // SSID appears under different field names depending on the event type.
     let ssid = xml_data_field(xml, "SSID")
         .or_else(|| xml_data_field(xml, "ProfileName"));
 
@@ -1019,12 +1046,20 @@ fn parse_wlan_event_xml(xml: &str, ssid_filter: &str) -> Option<WlanEventRecord>
         return None;
     }
 
-    let reason_code = xml_data_field(xml, "FailureReason")
-        .or_else(|| xml_data_field(xml, "ReasonCode"))
-        .or_else(|| xml_data_field(xml, "Reason"))
-        .and_then(|s| s.trim().parse::<u32>().ok());
+    // ReasonCode is the numeric field (decimal or "0x…" hex).
+    // FailureReason / ReasonText / SecurityHint carry human-readable strings —
+    // those go in `hint`, not here.
+    let reason_code = xml_data_field(xml, "ReasonCode")
+        .or_else(|| xml_data_field(xml, "SecurityHintCode"))
+        .and_then(|s| parse_reason_code(&s));
 
-    Some(WlanEventRecord { event_id, timestamp, ssid, reason_code })
+    // Best human-readable hint available for this event.
+    let hint = xml_data_field(xml, "SecurityHint")
+        .or_else(|| xml_data_field(xml, "ReasonText"))
+        .or_else(|| xml_data_field(xml, "FailureReason"))
+        .filter(|s| !s.is_empty() && s != "The operation was successful.");
+
+    Some(WlanEventRecord { event_id, timestamp, ssid, reason_code, hint })
 }
 
 // ---------------------------------------------------------------------------
