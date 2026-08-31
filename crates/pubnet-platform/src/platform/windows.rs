@@ -31,7 +31,7 @@ use windows_sys::Win32::NetworkManagement::WiFi::{
     DOT11_AUTH_ALGORITHM, WLAN_BSS_ENTRY, WLAN_BSS_LIST, WLAN_CONNECTION_ATTRIBUTES,
     WLAN_CONNECTION_PARAMETERS, WLAN_INTERFACE_INFO_LIST, WlanCloseHandle, WlanConnect,
     WlanDeleteProfile, WlanEnumInterfaces, WlanFreeMemory, WlanGetNetworkBssList, WlanOpenHandle,
-    WlanQueryInterface, WlanSetProfile, dot11_BSS_type_any, dot11_BSS_type_infrastructure,
+    WlanQueryInterface, WlanReasonCodeToString, WlanSetProfile, dot11_BSS_type_any, dot11_BSS_type_infrastructure,
     wlan_connection_mode_profile, wlan_interface_state_connected, wlan_intf_opcode_channel_number,
     wlan_intf_opcode_current_connection,
 };
@@ -884,6 +884,21 @@ impl Drop for EvtGuard {
             unsafe { EvtClose(self.0) };
         }
     }
+}
+
+/// Convert a numeric WLAN reason code to its Windows-localized description.
+/// Falls back to a hex string if the API returns an error or an empty string.
+pub fn wlan_reason_code_to_string(code: u32) -> String {
+    let mut buf = vec![0u16; 256];
+    let ret = unsafe {
+        WlanReasonCodeToString(code, (buf.len() * 2) as u32, buf.as_mut_ptr(), std::ptr::null_mut())
+    };
+    if ret != NO_ERROR {
+        return format!("0x{code:X}");
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let s = String::from_utf16_lossy(&buf[..len]);
+    if s.is_empty() { format!("0x{code:X}") } else { s }
 }
 
 /// Query the WLAN-AutoConfig operational event log for recent events that

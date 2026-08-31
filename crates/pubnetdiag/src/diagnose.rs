@@ -13,22 +13,6 @@ fn event_label(id: u32) -> &'static str {
     }
 }
 
-fn interpret_reason(code: u32) -> String {
-    match code {
-        // Common WLAN_REASON_CODE values
-        0x10001 => "unknown".to_string(),
-        0x10002 => "profile/network incompatible".to_string(),
-        0x10005 => "network not visible".to_string(),
-        0x1000E => "network not available".to_string(),
-        // KEY_MISMATCH: what the Intel AC 9560 reports when SAE fails against a
-        // transition-mode AP — surfaces in the UI as "bad password".
-        0x10010 => "key mismatch (wrong passphrase or auth protocol rejected)".to_string(),
-        0x10011 => "user did not respond to prompt".to_string(),
-        // 4-way handshake timeout (seen in event 11006 for PSK failures)
-        0x48005 => "4-way handshake timed out".to_string(),
-        c => format!("0x{c:X}"),
-    }
-}
 
 /// Run the diagnose flow for `ssid`: show the current BSS picture, then the
 /// most recent WLAN connection events from the Windows event log.
@@ -68,7 +52,7 @@ pub fn run_diagnose(ssid: &str, entries: &[BssEntry]) {
 
     #[cfg(target_os = "windows")]
     {
-        use pubnet_platform::platform::windows::query_wlan_events;
+        use pubnet_platform::platform::windows::{query_wlan_events, wlan_reason_code_to_string};
         let events = query_wlan_events(ssid, 20);
         if events.is_empty() {
             println!("  No recent events found in Microsoft-Windows-WLAN-AutoConfig/Operational.");
@@ -82,7 +66,7 @@ pub fn run_diagnose(ssid: &str, entries: &[BssEntry]) {
                 // Prefer the human-readable hint; fall back to decoded reason code.
                 let detail = ev.hint.as_deref()
                     .map(|h| format!(" — {h}"))
-                    .or_else(|| ev.reason_code.filter(|&c| c != 0).map(|c| format!(" — {}", interpret_reason(c))))
+                    .or_else(|| ev.reason_code.filter(|&c| c != 0).map(|c| format!(" — {}", wlan_reason_code_to_string(c))))
                     .unwrap_or_default();
 
                 println!("  {:<19}  {:>5}  {}{}", ev.timestamp, ev.event_id, label, detail);
