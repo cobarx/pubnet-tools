@@ -45,6 +45,26 @@ This means `/etc/resolv.conf` is written by NetworkManager, not systemd-resolved
 
 `ip addr show` lists `vmnet1` and `vmnet8` alongside real interfaces. Always derive the active interface from `ip route show default` (the `dev` field), not by scanning all interfaces. The default route's interface is the one that matters.
 
+## AT&T residential gateways vary in Wi-Fi security mode
+
+The AT&T gateway observed at the original incident site (the user's home, 2026-08-27)
+broadcasts `attinternet` as **WPA2+WPA3 transition mode** (both PSK and SAE AKMs in the
+RSN IE). This is the condition that triggers the Intel AC 9560 v23.x driver bug.
+
+The AT&T gateway at Henry's apartment originally triggered the Intel AC 9560 v23 bug
+(transition mode). As of 2026-08-30 it broadcasts `attinternet` as **WPA2-Personal only**
+— AT&T pushed a firmware update or swapped the hardware, changing the security mode.
+`pubnetdiag attinternet` correctly shows no `⚠` and `--repair` correctly reports "no
+known issues detected." The tool is not wrong — the gateway no longer broadcasts
+transition mode.
+
+Implication for testing: AT&T gateway security mode can change without notice (firmware
+updates, hardware swaps). The pubnetdiag repair flow must be tested against a confirmed
+transition-mode AP. The Galaxy S23 hotspot is a reliable stand-in — it broadcasts
+WPA2+WPA3 transition mode and was confirmed on 2026-08-30 (BSSID B2:9C:EC:4B:51:76,
+5 GHz ch 48). See `crates/pubnetdiag/tests/repair_flow.rs` for synthetic fixture
+coverage.
+
 ## Working directory must not be the Google Drive Insync path
 
 `/home/maxwell/Insync/...` is synced by Insync in the background. Running `npm install` there can trigger sync conflicts or file locking that corrupts `node_modules`. Always work in `/home/maxwell/Projects/ConnnectionChecker`.

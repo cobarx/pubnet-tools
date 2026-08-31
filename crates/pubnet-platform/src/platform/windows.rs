@@ -676,7 +676,7 @@ fn str_to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-fn build_wpa2_profile(ssid: &str, passphrase: &str) -> String {
+pub fn build_wpa2_profile(ssid: &str, passphrase: &str) -> String {
     let s = xml_escape(ssid);
     let p = xml_escape(passphrase);
     format!(
@@ -798,6 +798,48 @@ fn wlan_repair_blocking(ssid: &str, passphrase: &str) -> Result<(), String> {
     unsafe { WlanDeleteProfile(handle.0, &guid, wide_del.as_ptr(), std::ptr::null()) };
     Err("connection timed out after 15 seconds".to_string())
 }
+
+/// Remove the saved WLAN profile named `ssid` from all interfaces.
+/// Returns `Err` only if the WLAN subsystem is unavailable; a missing profile
+/// is not an error (the caller treats it as "already in unfixed state").
+pub fn delete_wlan_profile(ssid: &str) -> Result<(), String> {
+    let mut raw: HANDLE = std::ptr::null_mut();
+    let mut negotiated: u32 = 0;
+    if unsafe { WlanOpenHandle(2, std::ptr::null(), &mut negotiated, &mut raw) } != NO_ERROR {
+        return Err("no WLAN adapter available".to_string());
+    }
+    let handle = WlanHandle(raw);
+
+    let mut list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
+    if unsafe { WlanEnumInterfaces(handle.0, std::ptr::null(), &mut list) } != NO_ERROR
+        || list.is_null()
+    {
+        return Err("no WLAN interface found".to_string());
+    }
+    let list_mem = WlanMem(list as *mut _);
+    let l = unsafe { &*list };
+    let n = (l.dwNumberOfItems as usize).min(MAX_WLAN_INTERFACES);
+    let ifaces = unsafe { std::slice::from_raw_parts(l.InterfaceInfo.as_ptr(), n) };
+
+    let wide_ssid = str_to_wide(ssid);
+    let mut found = false;
+    for iface in ifaces {
+        let ret = unsafe {
+            WlanDeleteProfile(handle.0, &iface.InterfaceGuid, wide_ssid.as_ptr(), std::ptr::null())
+        };
+        if ret == NO_ERROR {
+            found = true;
+        }
+    }
+    drop(list_mem);
+
+    if found {
+        Ok(())
+    } else {
+        Err(format!("no saved profile named '{ssid}'"))
+    }
+}
+
 
 /// Create a WPA2-PSK profile for `ssid` and connect. Blocks the current
 /// thread for up to ~15 s polling for the connected state. Cleans up the
