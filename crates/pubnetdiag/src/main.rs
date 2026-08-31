@@ -1,7 +1,7 @@
 use clap::Parser;
 use pubnet_platform::platform::PlatformProbe;
 use pubnet_platform::types::{AuthMode, BssEntry};
-use pubnetdiag::{exit_codes, repair::detect_repairs};
+use pubnetdiag::{exit_codes, repair::{detect_repairs, find_latest_repair_log, reset_repair}};
 
 #[cfg(target_os = "windows")]
 use pubnet_platform::platform::windows::WindowsProbe as Probe;
@@ -23,6 +23,10 @@ struct Cli {
     /// Detect issues with the target SSID and apply the appropriate fix.
     #[arg(long)]
     repair: bool,
+
+    /// Remove a previously installed repair profile, returning to unfixed state.
+    #[arg(long)]
+    reset: bool,
 }
 
 fn auth_label(mode: AuthMode) -> &'static str {
@@ -108,6 +112,32 @@ async fn main() {
         }
         Some(e) => e,
     };
+
+    if cli.reset {
+        let target = match cli.ssid.as_deref() {
+            Some(s) => s,
+            None => {
+                eprintln!("--reset requires a target SSID: pubnetdiag <SSID> --reset");
+                std::process::exit(exit_codes::USAGE_ERROR);
+            }
+        };
+        match reset_repair(target).await {
+            Ok(()) => {
+                println!("Forced WPA2-PSK profile for '{target}' removed. Machine is now in unfixed state.");
+            }
+            Err(e) if e.contains("no saved profile") => {
+                println!("No forced profile found for '{target}' — already in unfixed state.");
+                if let Some(log_path) = find_latest_repair_log(target) {
+                    let _ = std::fs::remove_file(log_path);
+                }
+            }
+            Err(e) => {
+                eprintln!("Reset failed: {e}");
+                std::process::exit(exit_codes::REPAIR_FAILED);
+            }
+        }
+        std::process::exit(exit_codes::OK);
+    }
 
     if cli.repair {
         let target = match cli.ssid.as_deref() {

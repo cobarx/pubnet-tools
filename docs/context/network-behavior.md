@@ -45,6 +45,22 @@ This means `/etc/resolv.conf` is written by NetworkManager, not systemd-resolved
 
 `ip addr show` lists `vmnet1` and `vmnet8` alongside real interfaces. Always derive the active interface from `ip route show default` (the `dev` field), not by scanning all interfaces. The default route's interface is the one that matters.
 
+## AT&T residential gateways vary in Wi-Fi security mode
+
+The AT&T gateway observed at the original incident site (the user's home, 2026-08-27)
+broadcasts `attinternet` as **WPA2+WPA3 transition mode** (both PSK and SAE AKMs in the
+RSN IE). This is the condition that triggers the Intel AC 9560 v23.x driver bug.
+
+The AT&T gateway observed at Henry's place (2026-08-30) broadcasts `attinternet` as
+**WPA2-Personal only** (PSK only, no SAE). `pubnetdiag attinternet` correctly shows no
+`⚠` and `--repair` correctly reports "no known issues detected" here. The tool is not
+wrong — this specific gateway doesn't broadcast transition mode.
+
+Implication for testing: a transition-mode AP cannot be assumed from the AT&T brand
+alone. The pubnetdiag repair flow must be tested against a genuine transition-mode
+gateway or via synthetic BssEntry fixtures (see
+`crates/pubnetdiag/tests/repair_flow.rs`).
+
 ## Working directory must not be the Google Drive Insync path
 
 `/home/maxwell/Insync/...` is synced by Insync in the background. Running `npm install` there can trigger sync conflicts or file locking that corrupts `node_modules`. Always work in `/home/maxwell/Projects/ConnnectionChecker`.
