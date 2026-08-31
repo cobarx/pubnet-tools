@@ -51,15 +51,19 @@ The AT&T gateway observed at the original incident site (the user's home, 2026-0
 broadcasts `attinternet` as **WPA2+WPA3 transition mode** (both PSK and SAE AKMs in the
 RSN IE). This is the condition that triggers the Intel AC 9560 v23.x driver bug.
 
-The AT&T gateway observed at Henry's place (2026-08-30) broadcasts `attinternet` as
-**WPA2-Personal only** (PSK only, no SAE). `pubnetdiag attinternet` correctly shows no
-`⚠` and `--repair` correctly reports "no known issues detected" here. The tool is not
-wrong — this specific gateway doesn't broadcast transition mode.
+The AT&T gateway at Henry's apartment originally triggered the Intel AC 9560 v23 bug
+(transition mode). As of 2026-08-30 it broadcasts `attinternet` as **WPA2-Personal only**
+— AT&T pushed a firmware update or swapped the hardware, changing the security mode.
+`pubnetdiag attinternet` correctly shows no `⚠` and `--repair` correctly reports "no
+known issues detected." The tool is not wrong — the gateway no longer broadcasts
+transition mode.
 
-Implication for testing: a transition-mode AP cannot be assumed from the AT&T brand
-alone. The pubnetdiag repair flow must be tested against a genuine transition-mode
-gateway or via synthetic BssEntry fixtures (see
-`crates/pubnetdiag/tests/repair_flow.rs`).
+Implication for testing: AT&T gateway security mode can change without notice (firmware
+updates, hardware swaps). The pubnetdiag repair flow must be tested against a confirmed
+transition-mode AP. The Galaxy S23 hotspot is a reliable stand-in — it broadcasts
+WPA2+WPA3 transition mode and was confirmed on 2026-08-30 (BSSID B2:9C:EC:4B:51:76,
+5 GHz ch 48). See `crates/pubnetdiag/tests/repair_flow.rs` for synthetic fixture
+coverage.
 
 ## Working directory must not be the Google Drive Insync path
 
