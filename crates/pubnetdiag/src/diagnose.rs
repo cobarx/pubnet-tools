@@ -74,6 +74,8 @@ pub fn run_diagnose(ssid: &str, entries: &[BssEntry]) {
             println!("  No recent events found in Microsoft-Windows-WLAN-AutoConfig/Operational.");
             println!("  (Try connecting to '{ssid}' and running --diagnose again.)");
         } else {
+            println!("  {:<19}  {:<5}  {}", "Timestamp", "ID", "Description");
+            println!("  {}  {}  {}", "─".repeat(19), "─".repeat(5), "─".repeat(48));
             for ev in &events {
                 let label = event_label(ev.event_id);
 
@@ -83,7 +85,7 @@ pub fn run_diagnose(ssid: &str, entries: &[BssEntry]) {
                     .or_else(|| ev.reason_code.filter(|&c| c != 0).map(|c| format!(" — {}", interpret_reason(c))))
                     .unwrap_or_default();
 
-                println!("  {}  {:5}  {}{}", ev.timestamp, ev.event_id, label, detail);
+                println!("  {:<19}  {:>5}  {}{}", ev.timestamp, ev.event_id, label, detail);
             }
 
             let has_psk_mismatch = events.iter().any(|e| {
