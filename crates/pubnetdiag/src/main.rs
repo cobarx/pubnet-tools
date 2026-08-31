@@ -1,7 +1,7 @@
 use clap::Parser;
 use pubnet_platform::platform::PlatformProbe;
 use pubnet_platform::types::{AuthMode, BssEntry};
-use pubnetdiag::{exit_codes, repair::{detect_repairs, find_latest_repair_log, reset_repair}};
+use pubnetdiag::{diagnose, exit_codes, repair::{detect_repairs, find_latest_repair_log, reset_repair}};
 
 #[cfg(target_os = "windows")]
 use pubnet_platform::platform::windows::WindowsProbe as Probe;
@@ -27,6 +27,11 @@ struct Cli {
     /// Remove a previously installed repair profile, returning to unfixed state.
     #[arg(long)]
     reset: bool,
+
+    /// Show current BSS state and recent WLAN connection events from the system
+    /// event log. Useful for diagnosing why a connection is failing.
+    #[arg(long)]
+    diagnose: bool,
 }
 
 fn auth_label(mode: AuthMode) -> &'static str {
@@ -139,6 +144,17 @@ async fn main() {
         std::process::exit(exit_codes::OK);
     }
 
+    if cli.diagnose {
+        let target = match cli.ssid.as_deref() {
+            Some(s) => s,
+            None => {
+                eprintln!("--diagnose requires a target SSID: pubnetdiag <SSID> --diagnose");
+                std::process::exit(exit_codes::USAGE_ERROR);
+            }
+        };
+        diagnose::run_diagnose(target, &entries);
+        std::process::exit(exit_codes::OK);
+    }
 
     if cli.repair {
         let target = match cli.ssid.as_deref() {

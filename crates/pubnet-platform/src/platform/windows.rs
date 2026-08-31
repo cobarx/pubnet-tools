@@ -17,6 +17,10 @@ use crate::types::{ArpNeighbor, BssEntry, DnsResolverInfo, DnsSource, InterfaceK
 use std::net::Ipv4Addr;
 
 use windows_sys::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, HANDLE, NO_ERROR};
+use windows_sys::Win32::System::EventLog::{
+    EVT_HANDLE, EvtClose, EvtNext, EvtQuery, EvtRender,
+    EvtQueryChannelPath, EvtQueryReverseDirection, EvtRenderEventXml,
+};
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     FreeMibTable, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_MULTICAST, GetAdaptersAddresses,
     GetBestRoute2, GetIpNetTable2, ICMP_ECHO_REPLY, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211,
@@ -27,7 +31,7 @@ use windows_sys::Win32::NetworkManagement::WiFi::{
     DOT11_AUTH_ALGORITHM, WLAN_BSS_ENTRY, WLAN_BSS_LIST, WLAN_CONNECTION_ATTRIBUTES,
     WLAN_CONNECTION_PARAMETERS, WLAN_INTERFACE_INFO_LIST, WlanCloseHandle, WlanConnect,
     WlanDeleteProfile, WlanEnumInterfaces, WlanFreeMemory, WlanGetNetworkBssList, WlanOpenHandle,
-    WlanQueryInterface, WlanSetProfile, dot11_BSS_type_any, dot11_BSS_type_infrastructure,
+    WlanQueryInterface, WlanReasonCodeToString, WlanSetProfile, dot11_BSS_type_any, dot11_BSS_type_infrastructure,
     wlan_connection_mode_profile, wlan_interface_state_connected, wlan_intf_opcode_channel_number,
     wlan_intf_opcode_current_connection,
 };
@@ -850,6 +854,227 @@ pub async fn repair_wpa2(ssid: &str, passphrase: &str) -> Result<(), String> {
     tokio::task::spawn_blocking(move || wlan_repair_blocking(&ssid, &passphrase))
         .await
         .unwrap_or_else(|_| Err("internal error in repair task".to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// WLAN event log (--diagnose)
+// ---------------------------------------------------------------------------
+
+/// One record extracted from Microsoft-Windows-WLAN-AutoConfig/Operational.
+#[derive(Debug)]
+pub struct WlanEventRecord {
+    pub event_id: u32,
+    /// ISO-8601 timestamp as returned in the event XML, truncated to seconds.
+    pub timestamp: String,
+    /// SSID extracted from the event's EventData, if present.
+    pub ssid: Option<String>,
+    /// Numeric reason code from the event's EventData, if present.
+    /// May be absent if the event carries no code, or zero for success.
+    pub reason_code: Option<u32>,
+    /// Human-readable diagnostic hint from the event (SecurityHint, ReasonText,
+    /// or FailureReason depending on the event type).
+    pub hint: Option<String>,
+}
+
+/// RAII guard for `EVT_HANDLE`.
+struct EvtGuard(EVT_HANDLE);
+impl Drop for EvtGuard {
+    fn drop(&mut self) {
+        if self.0 != 0 {
+            unsafe { EvtClose(self.0) };
+        }
+    }
+}
+
+/// Convert a numeric WLAN reason code to its Windows-localized description.
+/// Falls back to a hex string if the API returns an error or an empty string.
+pub fn wlan_reason_code_to_string(code: u32) -> String {
+    let mut buf = vec![0u16; 256];
+    let ret = unsafe {
+        WlanReasonCodeToString(code, (buf.len() * 2) as u32, buf.as_mut_ptr(), std::ptr::null_mut())
+    };
+    if ret != NO_ERROR {
+        return format!("0x{code:X}");
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let s = String::from_utf16_lossy(&buf[..len]);
+    if s.is_empty() { format!("0x{code:X}") } else { s }
+}
+
+/// Query the WLAN-AutoConfig operational event log for recent events that
+/// mention `ssid_filter`. Returns up to `max_count` records, newest first.
+/// Returns an empty vec if the log is unavailable or unreadable.
+pub fn query_wlan_events(ssid_filter: &str, max_count: usize) -> Vec<WlanEventRecord> {
+    let channel = str_to_wide("Microsoft-Windows-WLAN-AutoConfig/Operational");
+    // Restrict to connection-lifecycle events to keep result sets small.
+    let xpath = str_to_wide(
+        "*[System[(EventID=8001 or EventID=8002 or EventID=8003 \
+                   or EventID=11004 or EventID=11005 or EventID=11006 \
+                   or EventID=11010)]]",
+    );
+
+    let raw = unsafe {
+        EvtQuery(
+            0,
+            channel.as_ptr(),
+            xpath.as_ptr(),
+            EvtQueryChannelPath | EvtQueryReverseDirection,
+        )
+    };
+    if raw == 0 {
+        return Vec::new();
+    }
+    let _query_guard = EvtGuard(raw);
+
+    let mut results = Vec::new();
+    // Hard cap on total events examined regardless of SSID matches.
+    let mut examined: usize = 0;
+    const MAX_EXAMINE: usize = 500;
+
+    let mut handles = [0isize; 16];
+    let mut returned: u32 = 0;
+
+    'outer: loop {
+        let ok = unsafe {
+            EvtNext(raw, handles.len() as u32, handles.as_mut_ptr(), u32::MAX, 0, &mut returned)
+        };
+        if ok == 0 || returned == 0 {
+            break;
+        }
+        for i in 0..(returned as usize) {
+            let ev = handles[i];
+            let xml = render_event_xml(ev);
+            unsafe { EvtClose(ev) };
+
+            examined += 1;
+            if let Some(rec) = parse_wlan_event_xml(&xml, ssid_filter) {
+                results.push(rec);
+                if results.len() >= max_count {
+                    break 'outer;
+                }
+            }
+            if examined >= MAX_EXAMINE {
+                break 'outer;
+            }
+        }
+    }
+
+    results
+}
+
+fn render_event_xml(event: EVT_HANDLE) -> String {
+    let mut buf_used: u32 = 0;
+    let mut prop_count: u32 = 0;
+    // First call: determine required buffer size (returns FALSE / ERROR_INSUFFICIENT_BUFFER).
+    unsafe {
+        EvtRender(0, event, EvtRenderEventXml, 0, std::ptr::null_mut(), &mut buf_used, &mut prop_count)
+    };
+    if buf_used == 0 {
+        return String::new();
+    }
+    // buf_used is in bytes; each UTF-16 code unit is 2 bytes.
+    let wchar_count = (buf_used as usize).div_ceil(2) + 1;
+    let mut buf = vec![0u16; wchar_count];
+    let ok = unsafe {
+        EvtRender(
+            0,
+            event,
+            EvtRenderEventXml,
+            (buf.len() * 2) as u32,
+            buf.as_mut_ptr().cast(),
+            &mut buf_used,
+            &mut prop_count,
+        )
+    };
+    if ok == 0 {
+        return String::new();
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..len])
+}
+
+// Windows event XML uses single-quoted attributes: Name='SSID' not Name="SSID".
+// Both helpers try single quotes first (the common case), then double quotes as
+// a fallback so we're not broken if the format ever changes.
+
+/// Extract a named `<Data Name='key'>value</Data>` field.
+fn xml_data_field(xml: &str, key: &str) -> Option<String> {
+    let sq = format!("<Data Name='{key}'>");
+    let dq = format!("<Data Name=\"{key}\">");
+    let start = xml.find(sq.as_str()).map(|p| p + sq.len())
+        .or_else(|| xml.find(dq.as_str()).map(|p| p + dq.len()))?;
+    let end = start + xml[start..].find("</Data>")?;
+    Some(xml[start..end].to_string())
+}
+
+/// Extract the text content of a simple element like `<EventID>8002</EventID>`.
+fn xml_element<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = xml.find(open.as_str())? + open.len();
+    let end = start + xml[start..].find(close.as_str())?;
+    Some(&xml[start..end])
+}
+
+/// Extract an attribute value — handles both single and double quote delimiters.
+fn xml_attr_value<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
+    let sq = format!("{attr}='");
+    let dq = format!("{attr}=\"");
+    let (start, close) = if let Some(p) = xml.find(sq.as_str()) {
+        (p + sq.len(), '\'')
+    } else if let Some(p) = xml.find(dq.as_str()) {
+        (p + dq.len(), '"')
+    } else {
+        return None;
+    };
+    let end = start + xml[start..].find(close)?;
+    Some(&xml[start..end])
+}
+
+/// Parse a reason code that may be decimal ("163851") or hex-prefixed ("0x48005").
+fn parse_reason_code(s: &str) -> Option<u32> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u32::from_str_radix(hex, 16).ok()
+    } else {
+        s.parse().ok()
+    }
+}
+
+fn parse_wlan_event_xml(xml: &str, ssid_filter: &str) -> Option<WlanEventRecord> {
+    let event_id: u32 = xml_element(xml, "EventID")?.parse().ok()?;
+
+    // Timestamp: trim sub-second precision and the trailing 'Z'.
+    let raw_ts = xml_attr_value(xml, "SystemTime").unwrap_or("");
+    let timestamp = raw_ts
+        .find('.')
+        .map(|dot| &raw_ts[..dot])
+        .unwrap_or(raw_ts)
+        .replace('T', " ");
+
+    // SSID appears under different field names depending on the event type.
+    let ssid = xml_data_field(xml, "SSID")
+        .or_else(|| xml_data_field(xml, "ProfileName"));
+
+    // Filter: only return records that match the requested SSID.
+    if ssid.as_deref() != Some(ssid_filter) {
+        return None;
+    }
+
+    // ReasonCode is the numeric field (decimal or "0x…" hex).
+    // FailureReason / ReasonText / SecurityHint carry human-readable strings —
+    // those go in `hint`, not here.
+    let reason_code = xml_data_field(xml, "ReasonCode")
+        .or_else(|| xml_data_field(xml, "SecurityHintCode"))
+        .and_then(|s| parse_reason_code(&s));
+
+    // Best human-readable hint available for this event.
+    let hint = xml_data_field(xml, "SecurityHint")
+        .or_else(|| xml_data_field(xml, "ReasonText"))
+        .or_else(|| xml_data_field(xml, "FailureReason"))
+        .filter(|s| !s.is_empty() && s != "The operation was successful.");
+
+    Some(WlanEventRecord { event_id, timestamp, ssid, reason_code, hint })
 }
 
 // ---------------------------------------------------------------------------
