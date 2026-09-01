@@ -91,11 +91,32 @@ confirming it's the same live socket, not a stale copy.
 Chose this over bind-mounting `~/.ssh` read-only specifically to keep private
 key material off the container filesystem entirely.
 
-**Caveat specific to this repo**: `origin` is HTTPS
-(`https://github.com/cobarx/pubnet-tools`), not SSH, so this doesn't do
-anything for pushing to pubnet-tools itself — that goes through `gh`/an
-HTTPS credential helper instead. This is for anything else that needs SSH
-(other remotes, deploy targets, jump hosts).
+`origin` was switched from HTTPS to SSH
+(`git@github.com:cobarx/pubnet-tools.git`) specifically to use this. Two
+things had to be true before it actually worked, in order encountered:
+
+1. **A `known_hosts` entry for `github.com` inside the container.** Without
+   one, `ssh` fails with `Host key verification failed` — the container had
+   never seen GitHub's host key before. Fixed with a second, read-only bind
+   mount:
+   ```json
+   "source=${localEnv:HOME}/.ssh/known_hosts,target=/home/dev/.ssh/known_hosts,type=bind,readonly"
+   ```
+   Reuses the host's already-trusted host keys rather than blindly
+   auto-accepting on first connect inside the container. Readable by the
+   container's `dev` user here because its UID (`1000`) happens to match the
+   host user's UID — not guaranteed on every machine; if they differ, either
+   loosen the file's permissions on the host or drop this mount and accept
+   the one-time host-key prompt inside the container instead.
+2. **An identity actually loaded in the host agent.** Forwarding the socket
+   only helps if there's a key in it — `ssh-add -l` reporting "no
+   identities" (on the host, and thus in the container too) means `ssh-add
+   ~/.ssh/id_ed25519` (or whichever key) still needs to be run on the host
+   first. Confirmed end to end: `ssh -T git@github.com` inside the
+   container failed with `Host key verification failed` before the
+   `known_hosts` mount, then with `Permission denied (publickey)` after it
+   (expected — no identity loaded yet), pinpointing each blocker in turn
+   rather than assuming.
 
 `${localEnv:SSH_AUTH_SOCK}` is resolved once, at container creation time. If
 the host agent restarts with a new socket path after that (rare with a

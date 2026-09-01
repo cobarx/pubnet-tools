@@ -10,7 +10,8 @@
   "mounts": [
     "source=pubnet-tools-cargo-registry,target=/home/dev/.cargo/registry,type=volume",
     "source=claude-code-config-${devcontainerId},target=/home/dev/.claude,type=volume",
-    "source=${localEnv:SSH_AUTH_SOCK},target=/ssh-agent,type=bind"
+    "source=${localEnv:SSH_AUTH_SOCK},target=/ssh-agent,type=bind",
+    "source=${localEnv:HOME}/.ssh/known_hosts,target=/home/dev/.ssh/known_hosts,type=bind,readonly"
   ],
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/dev/.claude"
