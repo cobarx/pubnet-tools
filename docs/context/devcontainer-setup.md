@@ -64,6 +64,55 @@ step first, `cargo fetch` (and Claude Code itself) fail with `Permission
 denied` the first time a volume is mounted. If you add another persisted path
 later, chown it the same way before anything writes there.
 
+## File sharing with the host
+
+**The workspace itself is automatic**: the project folder is bind-mounted at
+`/workspaces/pubnet-tools`, so edits on either side (host editor, container
+shell) are the same files instantly — no config, no copying.
+
+**SSH agent forwarding** is wired up in `devcontainer.json`:
+
+```json
+"mounts": [
+  "source=${localEnv:SSH_AUTH_SOCK},target=/ssh-agent,type=bind"
+],
+"remoteEnv": {
+  "SSH_AUTH_SOCK": "/ssh-agent"
+}
+```
+
+Bind-mounts the host's live agent socket (whatever `$SSH_AUTH_SOCK` resolves
+to when the container is created) rather than copying key material into the
+container — no private key ever lives inside it. Verified working: `ssh-add
+-l` inside the container returns the identical response as running it on the
+host directly (including "no identities" when the host agent is empty),
+confirming it's the same live socket, not a stale copy.
+
+Chose this over bind-mounting `~/.ssh` read-only specifically to keep private
+key material off the container filesystem entirely.
+
+**Caveat specific to this repo**: `origin` is HTTPS
+(`https://github.com/cobarx/pubnet-tools`), not SSH, so this doesn't do
+anything for pushing to pubnet-tools itself — that goes through `gh`/an
+HTTPS credential helper instead. This is for anything else that needs SSH
+(other remotes, deploy targets, jump hosts).
+
+`${localEnv:SSH_AUTH_SOCK}` is resolved once, at container creation time. If
+the host agent restarts with a new socket path after that (rare with a
+persistent agent manager; more likely with the ephemeral
+`/tmp/ssh-XXXXXX/agent.NNNN` path `ssh-agent` uses by default per login
+session), the mount goes stale until the container is recreated
+(`devcontainer up --remove-existing-container`, or rebuild from the editor).
+
+For any other host folder you want visible inside the container beyond the
+workspace, add a bind mount the same way:
+
+```json
+"mounts": [
+  "source=/host/path,target=/container/path,type=bind"
+]
+```
+
 ## Using it
 
 ```bash

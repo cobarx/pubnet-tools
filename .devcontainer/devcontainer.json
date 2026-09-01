@@ -9,10 +9,14 @@
   "remoteUser": "dev",
   "mounts": [
     "source=pubnet-tools-cargo-registry,target=/home/dev/.cargo/registry,type=volume",
-    "source=claude-code-config-${devcontainerId},target=/home/dev/.claude,type=volume"
+    "source=claude-code-config-${devcontainerId},target=/home/dev/.claude,type=volume",
+    "source=${localEnv:SSH_AUTH_SOCK},target=/ssh-agent,type=bind"
   ],
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/dev/.claude"
+  },
+  "remoteEnv": {
+    "SSH_AUTH_SOCK": "/ssh-agent"
   },
   "postCreateCommand": "sudo chown -R dev:dev /home/dev/.cargo/registry /home/dev/.claude && cargo fetch",
   "customizations": {
