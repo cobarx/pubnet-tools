@@ -5,9 +5,9 @@ ticket: 002
 slug: tls-feature-gating
 type: chore
 points: 2
-status: todo
+status: in-review
 tracker_ref: tbd
-pr: none
+pr: "27"
 related: []
 ---
 
@@ -33,7 +33,7 @@ Let the Android crate build with rustls while every desktop build keeps
   explicit `Connector` for `tokio_tungstenite::connect_async` (native-tls
   auto-selects today), add a small `#[cfg(feature = "tls-rustls")]` helper;
   otherwise no code change.
-- **In:** `docs/decisions/2026-08-28-android-tls-rustls.md`.
+- **In:** `docs/decisions/2026-08-30-android-tls-rustls.md`.
 - **Out:** the Android crate itself (ticket 3 sets `default-features = false,
   features = ["tls-rustls"]` on its `pubnet-tools` dependency).
 

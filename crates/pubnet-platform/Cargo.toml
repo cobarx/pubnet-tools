@@ -9,6 +9,9 @@ regex = "1.13.1"
 serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "process", "fs"] }
 
+[dev-dependencies]
+serde_json = "1.0.151"
+
 # Windows probes call the Win32 API directly (IP Helper + WLAN + ICMP) rather
 # than shelling out to PowerShell/netsh/ping.exe — see
 # docs/decisions/2026-08-28-windows-probes-via-win32-api.md. Windows-only.
