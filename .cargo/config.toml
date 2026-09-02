@@ -1,0 +1,20 @@
+# 16 KB page-size alignment for the Android cdylib (crates/pubnetchk-android).
+#
+# Android 15+ on 16 KB-page devices (recent Pixels; a Play requirement from
+# Nov 2025) rejects a native library whose ELF LOAD segments are only 4 KB
+# aligned. NDK r27's lld needs this flag explicitly; r28 makes 16 KB the
+# default. cargo-ndk (`just android-lib`) and the rust-android-gradle plugin
+# both honour this file.
+#
+# Scoped to the three `*-linux-android` triples — the Linux/macOS/Windows
+# desktop builds use different triples and are untouched (verify with
+# `cargo build` + `cargo tree` per the CLAUDE.md TLS note).
+
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384", "-C", "link-arg=-Wl,-z,common-page-size=16384"]
+
+[target.armv7-linux-androideabi]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384", "-C", "link-arg=-Wl,-z,common-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384", "-C", "link-arg=-Wl,-z,common-page-size=16384"]

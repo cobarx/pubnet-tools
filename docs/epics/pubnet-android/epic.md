@@ -79,7 +79,7 @@ missing tool, stop and hand it back to the owner.
 | 1 | `SnapshotProbe` + `HostSnapshot` in pubnet-platform | feature | 3 | todo | tbd | none |
 | 2 | TLS backend feature-gating (rustls for Android) | chore | 2 | todo | tbd | none |
 | 3 | `pubnetchk-android` UniFFI cdylib + `run_audit_json` | feature | 5 | todo | tbd | none |
-| 4 | Android Studio project + Gradle/Rust wiring | feature | 5 | todo | tbd | none |
+| 4 | Android Studio project + Gradle/Rust wiring | feature | 5 | in-review | tbd | tbd |
 | 5 | `NetworkFacts` collector + Compose skeleton screen | feature | 5 | todo | tbd | none |
 | 6 | Reliability on Android — unprivileged ICMP | feature | 5 | deferred | tbd | none |
 | 7 | Speed / NDT7 on Android — validate over rustls | feature | 3 | deferred | tbd | none |
