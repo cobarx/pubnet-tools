@@ -20,7 +20,8 @@ RUN microdnf install -y dnf && microdnf clean all
 #   ca-certificates      - TLS to crates.io and the endpoints pubnetchk probes
 #   sudo, shadow-utils   - non-root dev user + passwordless sudo below
 #   curl, which          - installers (rustup, just) and general scripting
-#   tar                  - just's install script unpacks its release archive with it
+#   tar, unzip           - tar: just's install script unpacks its release archive
+#                          with it; unzip: the Android cmdline-tools zip (below)
 #   vim                  - editor
 #   glow                 - terminal markdown renderer, for reading docs/*.md in place
 #                          (Fedora package since F43 - hence fedora-minimal:44, not :42)
@@ -38,6 +39,7 @@ RUN dnf install -y \
         curl \
         which \
         tar \
+        unzip \
         vim \
         glow \
         zsh \
@@ -69,3 +71,62 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
 # just - the command runner this repo's justfile depends on (build/release/test/clippy).
 RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
     | sudo bash -s -- --to /usr/local/bin
+
+# ---------------------------------------------------------------------------
+# Android build toolchain - for the pubnet-android epic (crates/pubnetchk-android
+# + the android/ Gradle project). See docs/epics/pubnet-android/epic.md.
+#
+# None of this is needed to build, lint, or unit-test pubnetchk itself - it is
+# here so the one container covers every crate in the workspace and the
+# justfile's `android-lib` / `android-bindings` recipes work out of the box.
+# The epic lists these as owner-installed prerequisites; the devcontainer is
+# where this machine's owner installs them.
+# ---------------------------------------------------------------------------
+
+# Temurin JDK 21 (LTS), for Gradle / the Android Gradle Plugin. Fedora 44 only
+# packages JDK 25, which AGP does not support yet - hence a pinned Adoptium
+# build under /opt rather than a dnf package.
+ENV JAVA_HOME=/opt/java
+RUN sudo mkdir -p "$JAVA_HOME" && sudo chown "$USERNAME:$USERNAME" "$JAVA_HOME" \
+    && curl --proto '=https' --tlsv1.2 -sSfL \
+        "https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jdk/hotspot/normal/eclipse" \
+        -o /tmp/jdk.tar.gz \
+    && tar -xzf /tmp/jdk.tar.gz -C "$JAVA_HOME" --strip-components=1 \
+    && rm /tmp/jdk.tar.gz
+ENV PATH=$JAVA_HOME/bin:$PATH
+
+# Android SDK: command-line tools, then platform-tools + a pinned platform,
+# build-tools, and NDK via sdkmanager. Versions are pinned so a rebuild - and
+# CI (epic ticket 8) - resolve the same toolchain. Keep the NDK version in sync
+# with android/app/build.gradle.kts once epic ticket 4 lands.
+ARG ANDROID_CMDLINE_TOOLS=11076708
+ARG ANDROID_PLATFORM=android-35
+ARG ANDROID_BUILD_TOOLS=35.0.0
+ARG ANDROID_NDK_VERSION=27.2.12479018
+ENV ANDROID_HOME=/opt/android-sdk \
+    ANDROID_SDK_ROOT=/opt/android-sdk
+ENV ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}
+RUN sudo mkdir -p "$ANDROID_HOME/cmdline-tools" \
+    && sudo chown -R "$USERNAME:$USERNAME" "$ANDROID_HOME" \
+    && curl --proto '=https' --tlsv1.2 -sSfL \
+        "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS}_latest.zip" \
+        -o /tmp/cmdline-tools.zip \
+    && unzip -q /tmp/cmdline-tools.zip -d /tmp/ct \
+    && mv /tmp/ct/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest" \
+    && rm -rf /tmp/cmdline-tools.zip /tmp/ct \
+    && yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null \
+    && "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+        "platform-tools" \
+        "platforms;${ANDROID_PLATFORM}" \
+        "build-tools;${ANDROID_BUILD_TOOLS}" \
+        "ndk;${ANDROID_NDK_VERSION}" > /dev/null
+ENV PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+
+# Rust Android targets + cargo-ndk (drives the per-ABI cross-compile in
+# `just android-lib`). uniffi-bindgen is the `[[bin]]` shim in
+# crates/pubnetchk-android - no separate install.
+RUN rustup target add \
+        aarch64-linux-android \
+        armv7-linux-androideabi \
+        x86_64-linux-android \
+    && cargo install cargo-ndk --locked
