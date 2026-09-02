@@ -10,6 +10,7 @@
   "runArgs": ["--name", "pubnet-tools-dev"],
   "mounts": [
     "source=pubnet-tools-cargo-registry,target=/home/dev/.cargo/registry,type=volume",
+    "source=pubnet-tools-target,target=/workspaces/pubnet-tools/target,type=volume",
     "source=claude-code-config-${devcontainerId},target=/home/dev/.claude,type=volume",
     "source=${localEnv:SSH_AUTH_SOCK},target=/ssh-agent,type=bind",
     "source=${localEnv:HOME}/.ssh/known_hosts,target=/home/dev/.ssh/known_hosts,type=bind,readonly"
@@ -20,7 +21,7 @@
   "remoteEnv": {
     "SSH_AUTH_SOCK": "/ssh-agent"
   },
-  "postCreateCommand": "sudo chown -R dev:dev /home/dev/.cargo/registry /home/dev/.claude && cargo fetch",
+  "postCreateCommand": "sudo chown -R dev:dev /home/dev/.cargo/registry /home/dev/.claude /workspaces/pubnet-tools/target && cargo fetch",
   "customizations": {
     "vscode": {
       "extensions": [
