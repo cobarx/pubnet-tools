@@ -85,6 +85,7 @@ missing tool, stop and hand it back to the owner.
 | 7 | Speed / NDT7 on Android — validate over rustls | feature | 3 | deferred | tbd | none |
 | 8 | CI: build `pubnetchk-android` + `assembleDebug` | chore | 2 | deferred | tbd | none |
 | 9 | DoH validation against the device trust store (platform verifier + JVM `Context`) | feature | 3 | deferred | tbd | none |
+| 10 | Cellular / mobile-network facts in the snapshot + UI | feature | 3 | deferred | tbd | none |
 
 Walking-skeleton points (1–5): `20`
 
@@ -99,10 +100,12 @@ Walking-skeleton points (1–5): `20`
   `cli.rs` (pure refactor, no CLI behavior change).
 - Ticket 4 needs 3 (there must be a crate to build a `.so` from).
 - Ticket 5 needs 4. This is the ticket that produces a running app.
-- Tickets 6–9 follow the skeleton in any order; 6, 7 and 9 each open with a
+- Tickets 6–10 follow the skeleton in any order; 6, 7 and 9 each open with a
   decision doc before implementation. Ticket 9 is an enhancement (DoH against the
   device trust store instead of the bundled Mozilla roots), not a blocker — the
-  skeleton's DoH probe already works via `webpki-roots` (`crate::tls`).
+  skeleton's DoH probe already works via `webpki-roots` (`crate::tls`). Ticket 10
+  extends the snapshot to cellular so the app is useful (and not misleading) off
+  Wi-Fi; it touches the shared `InterfaceKind` type and the snapshot spec.
 
 ## Decision docs
 
