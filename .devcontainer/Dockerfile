@@ -24,6 +24,7 @@ RUN microdnf install -y dnf && microdnf clean all
 #   vim                  - editor
 #   glow                 - terminal markdown renderer, for reading docs/*.md in place
 #                          (Fedora package since F43 - hence fedora-minimal:44, not :42)
+#   zsh                  - login shell for the dev user, set below
 RUN dnf install -y \
         gcc \
         openssl-devel \
@@ -37,13 +38,14 @@ RUN dnf install -y \
         tar \
         vim \
         glow \
+        zsh \
     && dnf clean all
 
 # Non-root user with passwordless sudo. Dev Containers convention, and also
 # what Claude Code's bypassPermissions/--dangerously-skip-permissions mode
 # requires - it refuses to start as root or under sudo.
 ARG USERNAME=dev
-RUN useradd -m -s /bin/bash "$USERNAME" \
+RUN useradd -m -s /bin/zsh "$USERNAME" \
     && echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/"$USERNAME" \
     && chmod 0440 /etc/sudoers.d/"$USERNAME"
 
