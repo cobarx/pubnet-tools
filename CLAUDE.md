@@ -90,7 +90,12 @@ pubnet-tools/
                            armeabi-v7a / x86_64; `generateUniffiBindings` emits the Kotlin
                            into build/generated/uniffi (wired as a preBuild dep)
     app/src/main/kotlin/com/cobarx/pubnetchk/
-      MainActivity.kt      hosts the Compose screen (ticket 5 fills it in)
+      MainActivity.kt      hosts the Compose screen; requests ACCESS_FINE_LOCATION
+      NetworkFacts.kt      builds the HostSnapshot from ConnectivityManager / WifiManager /
+                           LinkProperties / /proc/net/arp — the Kotlin side of the seam
+      AuditViewModel.kt    gather facts -> runAuditJson (Dispatchers.IO) -> parse -> UI state
+      ReportModel.kt       @Serializable mirror of the report JSON (skeleton fields only)
+      MainScreen.kt        Scan button, risk badge, Network/Security/Performance sections
     README.md              NDK version, cargo-ndk, Rust targets, how bindings are generated
 ```
 
