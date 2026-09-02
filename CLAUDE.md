@@ -194,7 +194,11 @@ for the toolchain rationale).
   contributors.
 - **A system-OpenSSL dependency.** `reqwest`/`tokio-tungstenite` use `native-tls`
   (SChannel on Windows, Secure Transport on macOS, system OpenSSL only on Linux). Keep
-  it that way — verify with `cargo tree` after touching an HTTP/TLS dependency.
+  it that way — verify with `cargo tree` after touching an HTTP/TLS dependency. The
+  TLS backend is a feature of the `pubnet-tools` crate (`tls-native`, the default,
+  vs `tls-rustls`); only the Android cdylib builds with `tls-rustls`, because
+  Android has no app-accessible system TLS — see
+  [2026-08-30-android-tls-rustls.md](docs/decisions/2026-08-30-android-tls-rustls.md).
 
 ## Documentation index
 
@@ -225,6 +229,8 @@ for the toolchain rationale).
   - [2026-08-27-windows-platform-support.md](docs/decisions/2026-08-27-windows-platform-support.md) — GNU toolchain (still current); PowerShell probe mechanism (**superseded**)
   - [2026-08-28-windows-probes-via-win32-api.md](docs/decisions/2026-08-28-windows-probes-via-win32-api.md) — Windows probes call the Win32 API directly (`windows-sys`); no PowerShell/netsh/ping.exe; why the fixture corpus was dropped
   - [2026-08-26-macos-wifi-without-airport.md](docs/decisions/2026-08-26-macos-wifi-without-airport.md) — `airport` was removed in macOS 15/26; fast `ipconfig getsummary` (SSID+encryption) + opt-in slow `system_profiler` (channel+signal); SSID is Location-Services-gated
+  - [2026-08-30-android-tls-rustls.md](docs/decisions/2026-08-30-android-tls-rustls.md) — TLS backend is a crate feature (`tls-native` default vs `tls-rustls`); only the Android cdylib uses rustls; desktop `cargo tree` unchanged
+- [docs/epics/](docs/epics/) — multi-ticket bodies of work: `<slug>/epic.md` + `tickets/NNN-*.md`
 - [docs/context/](docs/context/) — observed network behavior and domain background;
   read when debugging a check that misbehaves on a specific network
   - [network-behavior.md](docs/context/network-behavior.md) — live recon findings (captive portals, Quad9 blocking, nmcli quirks, VMware interfaces)
