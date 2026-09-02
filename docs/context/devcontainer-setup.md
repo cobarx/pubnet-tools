@@ -41,6 +41,15 @@ On top of that:
 - **`vim`, `glow`** — editor and terminal markdown rendering, for reading
   `docs/*.md` in place. `glow` is an official Fedora package, but only from
   **Fedora 43 onward** — this is the reason the tag is `:44`, not `:42`.
+- **Android build toolchain** — Temurin JDK 21 (`/opt/java`), the Android SDK
+  (`/opt/android-sdk`: platform-tools, `android-35`, build-tools 35.0.0, NDK
+  r27c), `cargo-ndk`, and the `aarch64`/`armv7`/`x86_64` `-linux-android` Rust
+  targets. `JAVA_HOME`, `ANDROID_HOME`, `ANDROID_NDK_HOME` are set in the image.
+  None of it is needed for `pubnetchk` itself; it is here so the one container
+  covers `crates/pubnetchk-android` and the `android/` Gradle project from the
+  [pubnet-android epic](../epics/pubnet-android/epic.md), and so `just
+  android-lib` / `just android-bindings` work with no host setup. Versions are
+  pinned as `ARG`s at the top of that block in the Dockerfile.
 - **Claude Code CLI**, via the official
   [`ghcr.io/anthropics/devcontainer-features/claude-code`](https://github.com/anthropics/devcontainer-features/tree/main/src/claude-code)
   feature in `devcontainer.json`, not the Dockerfile.
@@ -210,6 +219,15 @@ a trustworthy answer if run here:
 So: build, lint, and unit-test in the container; run `just test-all` and any
 real-world verification directly on a real install of each target OS, outside
 any container.
+
+**Android:** the Rust side builds here. `just android-lib` cross-compiles the
+per-ABI `.so` and `just android-bindings` generates the UniFFI Kotlin, both
+verified in this container. `./gradlew :app:assembleDebug` (once epic ticket 4
+lands the `android/` project) also runs here. What does *not*: running the app
+on a device or emulator (no `adb`-attached device, no KVM for the emulator),
+and, as with the desktop checks, any "does the audit read this network
+correctly" verification, since the snapshot the Android probe consumes is
+gathered by framework APIs on a real phone.
 
 ## A bug this setup surfaced
 

@@ -30,9 +30,29 @@ way to get one:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
+### Dev Container (any host OS)
+
+`.devcontainer/` is a ready-made [Dev Containers](https://containers.dev/) environment
+(Fedora base) with the Rust toolchain, `just`, and the Android cross-compile toolchain
+(Temurin JDK, Android SDK + NDK, `cargo-ndk`, the `*-linux-android` Rust targets) already
+installed. From VS Code or a JetBrains IDE use "Reopen in Container"; with the
+[`devcontainer` CLI](https://github.com/devcontainers/cli):
+
+```bash
+devcontainer up --workspace-folder .
+docker exec -it pubnet-tools-dev zsh
+```
+
+Good for `just build` / `just clippy` / `just test` on any crate in the workspace. It is
+a Linux container, so it can't run `just test-all`, the macOS/Windows probes, or any
+"does the audit read this network correctly" check (those need host access on the target
+OS). See [docs/context/devcontainer-setup.md](docs/context/devcontainer-setup.md).
+
+### Native host setup
+
 The runtime prerequisites depend on your OS:
 
-### Linux
+#### Linux
 
 Uses `nmcli` (NetworkManager), `ip` (iproute2), `resolvectl` (systemd), and `ping` —
 all present on a standard desktop distro. Building also needs the system OpenSSL
@@ -46,7 +66,7 @@ sudo apt install build-essential pkg-config libssl-dev
 sudo dnf install @development-tools pkg-config openssl-devel
 ```
 
-### macOS
+#### macOS
 
 Everything the probes call (`route`, `ifconfig`, `arp`, `scutil`, `networksetup`,
 `ping`) ships with the OS. Install the Xcode command-line tools for a linker:
@@ -55,7 +75,7 @@ Everything the probes call (`route`, `ifconfig`, `arp`, `scutil`, `networksetup`
 xcode-select --install
 ```
 
-### Windows 10+
+#### Windows 10+
 
 The probes call the Win32 API directly, so there's nothing extra at runtime. For
 building, use the **GNU toolchain** — the default MSVC toolchain would pull in the
