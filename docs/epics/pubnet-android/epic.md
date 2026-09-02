@@ -103,7 +103,7 @@ Walking-skeleton points (1–5): `20`
 
 ## Decision docs
 
-- `docs/decisions/2026-08-28-android-app-architecture.md` — workspace layout,
+- `docs/decisions/2026-08-30-android-app-architecture.md` — workspace layout,
   UniFFI + JSON-snapshot bridge (why not typed records or a callback probe),
   rust-android-gradle, Compose. Cross-references the Windows platform decision
   as the sibling "new platform" precedent.

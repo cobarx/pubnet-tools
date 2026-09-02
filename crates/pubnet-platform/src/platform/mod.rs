@@ -11,6 +11,11 @@ pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+/// Data-driven probe — answers from a `HostSnapshot` instead of running
+/// commands. Not `#[cfg]`-gated: it is pure data, and the caller (the Android
+/// app, tests) decides when to use it. See `snapshot::SnapshotProbe`.
+pub mod snapshot;
+
 /// True when the interface name identifies a software-defined tunnel (VPN).
 /// utun* = macOS Network Extension tunnels (Tailscale, OpenVPN, WireGuard, built-in macOS VPN)
 /// tun*/tap* = Linux userspace tunnel interfaces
