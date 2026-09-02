@@ -167,12 +167,24 @@ workspace, add a bind mount the same way:
 ```bash
 # VS Code / JetBrains: Command Palette -> "Dev Containers: Reopen in Container"
 
-# CLI (npm i -g @devcontainers/cli):
+# CLI (npm i -g @devcontainers/cli) - create/rebuild, and one-off commands:
 devcontainer up --workspace-folder .
 devcontainer exec --workspace-folder . just check
 devcontainer exec --workspace-folder . just clippy
 devcontainer exec --workspace-folder . just test
+
+# Interactive shell - use docker exec directly, not `devcontainer exec`:
+docker exec -it pubnet-tools-dev zsh
 ```
+
+`devcontainer exec` is reliable for one-off, non-interactive commands (as
+above) but doesn't allocate a real TTY for an interactive session — running
+`devcontainer exec --workspace-folder . zsh` returns to the host prompt
+immediately instead of dropping you into a shell, silently (zsh reads EOF on
+stdin and exits clean, so there's no error to go on). `docker exec -it` does
+allocate one properly. The container name is fixed (`pubnet-tools-dev`, set
+via `runArgs` in `devcontainer.json`), so this command doesn't change across
+rebuilds.
 
 Validated end to end: `just check`, `just clippy`, and `just test` (91 unit
 tests across `pubnetchk` and `pubnetdiag`) all pass clean inside this
