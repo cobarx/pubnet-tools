@@ -7,7 +7,7 @@
     "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
   },
   "remoteUser": "dev",
-  "runArgs": ["--name", "pubnet-tools-dev"],
+  "runArgs": ["--name", "pubnet-tools-dev", "--hostname", "pubnet-tools-dev"],
   "workspaceMount": "source=${localWorkspaceFolder},target=/home/dev/code/pubnet-tools,type=bind",
   "workspaceFolder": "/home/dev/code/pubnet-tools",
   "mounts": [
