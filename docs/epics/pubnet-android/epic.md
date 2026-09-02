@@ -81,7 +81,7 @@ missing tool, stop and hand it back to the owner.
 | 3 | `pubnetchk-android` UniFFI cdylib + `run_audit_json` | feature | 5 | todo | tbd | none |
 | 4 | Android Studio project + Gradle/Rust wiring | feature | 5 | in-review | tbd | tbd |
 | 5 | `NetworkFacts` collector + Compose skeleton screen | feature | 5 | in-review | tbd | tbd |
-| 6 | Reliability on Android — unprivileged ICMP | feature | 5 | deferred | tbd | none |
+| 6 | Reliability on Android — unprivileged ICMP | feature | 5 | in-review | tbd | tbd |
 | 7 | Speed / NDT7 on Android — validate over rustls | feature | 3 | deferred | tbd | none |
 | 8 | CI: build `pubnetchk-android` + `assembleDebug` | chore | 2 | deferred | tbd | none |
 | 9 | DoH validation against the device trust store (platform verifier + JVM `Context`) | feature | 3 | deferred | tbd | none |
@@ -101,7 +101,8 @@ Walking-skeleton points (1–5): `20`
 - Ticket 4 needs 3 (there must be a crate to build a `.so` from).
 - Ticket 5 needs 4. This is the ticket that produces a running app.
 - Tickets 6–10 follow the skeleton in any order; 6, 7 and 9 each open with a
-  decision doc before implementation. Ticket 9 is an enhancement (DoH against the
+  decision doc before implementation. Ticket 6 (reliability) is done —
+  unprivileged datagram ICMP. Ticket 9 is an enhancement (DoH against the
   device trust store instead of the bundled Mozilla roots), not a blocker — the
   skeleton's DoH probe already works via `webpki-roots` (`crate::tls`). Ticket 10
   extends the snapshot to cellular so the app is useful (and not misleading) off
@@ -116,8 +117,9 @@ Walking-skeleton points (1–5): `20`
 - `docs/decisions/2026-08-30-android-tls-rustls.md` — no app-accessible system
   TLS on Android; feature-gated rustls for the Android crate only; desktop
   `cargo tree` stays `native-tls`.
-- (ticket 6) `docs/decisions/<date>-android-unprivileged-icmp.md` — datagram
-  ICMP socket vs `/system/bin/ping` vs TCP-connect latency.
+- `docs/decisions/2026-09-02-android-unprivileged-icmp.md` (ticket 6) — datagram
+  ICMP socket (`SOCK_DGRAM`/`IPPROTO_ICMP`, unprivileged on Android) vs
+  `SOCK_RAW` vs `/system/bin/ping` vs TCP-connect latency.
 - (ticket 9) `docs/decisions/<date>-android-rustls-platform-verifier.md` — how
   the rustls platform verifier gets its JVM `Context` (JNI init vs `ndk_context`
   vs UniFFI-exported init), to validate DoH against the device trust store. The

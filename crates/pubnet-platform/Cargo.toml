@@ -12,6 +12,11 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "t
 [dev-dependencies]
 serde_json = "1.0.151"
 
+# Unprivileged datagram ICMP for the reliability check on Android (and Linux) —
+# see src/net_icmp.rs and docs/decisions/2026-09-02-android-unprivileged-icmp.md.
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+socket2 = "0.6"
+
 # Windows probes call the Win32 API directly (IP Helper + WLAN + ICMP) rather
 # than shelling out to PowerShell/netsh/ping.exe — see
 # docs/decisions/2026-08-28-windows-probes-via-win32-api.md. Windows-only.

@@ -128,11 +128,37 @@ private fun ReportView(report: Report) {
     }
 
     SectionCard("Performance") {
-        Text(
-            "Reliability and speed are not on Android yet.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        val rel = report.reliability.data
+        if (report.reliability.status == "skipped" || rel == null) {
+            Text(
+                report.reliability.errors.firstOrNull() ?: "Reliability was not run.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            KeyValue("Gateway", if (rel.gatewayReachable) "reachable" else "unreachable")
+            KeyValue("Internet", if (rel.internetReachable) "reachable" else "unreachable")
+            rel.targets.forEach { t ->
+                val rtt = t.avgMs?.let { "%.0f ms".format(it) } ?: "—"
+                val loss = if (t.packetLossPct > 0) "  ·  %.0f%% loss".format(t.packetLossPct) else ""
+                KeyValue("  ${t.host}", if (t.reachable) "$rtt$loss" else "no reply")
+            }
+        }
+        StatusLine(report.reliability.status, report.reliability.errors)
+
+        Spacer(Modifier.height(8.dp))
+        val spd = report.speed.data
+        if (report.speed.status == "skipped" || spd == null) {
+            Text(
+                "Speed test is not on Android yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            KeyValue("Download", "%.1f Mbps".format(spd.downloadMbps))
+            KeyValue("Upload", "%.1f Mbps".format(spd.uploadMbps))
+            KeyValue("Latency", "%.0f ms  ·  %.0f ms jitter".format(spd.latencyMs, spd.jitterMs))
+        }
     }
 
     if (report.score.findings.isNotEmpty()) {
