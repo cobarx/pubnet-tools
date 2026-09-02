@@ -7,6 +7,7 @@
     "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
   },
   "remoteUser": "dev",
+  "runArgs": ["--name", "pubnet-tools-dev"],
   "mounts": [
     "source=pubnet-tools-cargo-registry,target=/home/dev/.cargo/registry,type=volume",
     "source=claude-code-config-${devcontainerId},target=/home/dev/.claude,type=volume",
