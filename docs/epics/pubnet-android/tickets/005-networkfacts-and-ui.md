@@ -99,6 +99,18 @@ returns `topology: skipped` for that, so surface `errors[]`.
   ticket-15 workspace restructure) moved to `crates/pubnetchk/examples/` and
   gained a `--json` mode; regenerates `docs/examples/sample-report.html`
   byte-identically.
+- On-device testing (Samsung S918, Android 16) surfaced a hard crash:
+  `reqwest`'s rustls feature hard-links `rustls-platform-verifier`, which
+  `abort()`s the process ("Expect rustls-platform-verifier to be initialized")
+  the first time a TLS config is built, because no JVM `Context` is registered
+  (JNA load, not `System.loadLibrary`) — and `panic = "abort"` makes it
+  uncatchable. Fixed by `crates/pubnetchk/src/tls.rs`: the `tls-rustls` path
+  builds reqwest with `use_preconfigured_tls` + a `webpki-roots` `ClientConfig`,
+  so the verifier is never constructed. DoH now works (validating against
+  Mozilla roots); the device trust store is ticket 9. See the 2026-09-02 update
+  in `docs/decisions/2026-08-30-android-tls-rustls.md`.
+- The DNS-leak *verdict* is still `uncertain` on Android regardless — the engine
+  has no way to see the resolver's egress IP (same as macOS / Windows).
 - On-device verification of the full acceptance criteria (1–3) is the user's;
   the dev container has no adb device / KVM. `assembleDebug` produces an APK
   containing `lib/<abi>/libpubnetchk_android.so` + the UniFFI runtime; unit

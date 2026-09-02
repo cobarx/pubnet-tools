@@ -7,6 +7,7 @@ pub mod audit;
 pub mod checks;
 pub mod output;
 pub mod scoring;
+mod tls;
 pub mod types;
 
 // The clap CLI and the desktop `run` / `record` entry points. Not built for

@@ -17,10 +17,18 @@ path = "src/main.rs"
 default = ["tls-native"]
 tls-native = ["reqwest/native-tls", "tokio-tungstenite/native-tls"]
 # reqwest 0.13's `rustls` feature = the aws-lc-rs crypto provider +
-# rustls-platform-verifier (the OS trust store; on Android needs a context,
-# wired in the android crate). tokio-tungstenite uses webpki bundled roots so
-# the WebSocket path needs no JNI context. See the decision doc.
-tls-rustls = ["reqwest/rustls", "tokio-tungstenite/rustls-tls-webpki-roots"]
+# rustls-platform-verifier. That verifier `abort()`s the process on Android if
+# no JVM Context was ever registered (the cdylib is loaded through JNA, not
+# System.loadLibrary, so there is none) — so on this path `crate::tls` builds
+# reqwest with a webpki-roots ClientConfig via `use_preconfigured_tls`, never
+# invoking the platform verifier. Same roots tokio-tungstenite already uses for
+# the NDT7 WebSocket. See docs/decisions/2026-08-30-android-tls-rustls.md.
+tls-rustls = [
+    "reqwest/rustls",
+    "tokio-tungstenite/rustls-tls-webpki-roots",
+    "dep:rustls",
+    "dep:webpki-roots",
+]
 
 [dependencies]
 pubnet-platform = { path = "../pubnet-platform" }
@@ -37,6 +45,11 @@ regex = "1.13.1"
 # whole h2 subtree (~300KB off the binary). Cloudflare/Google DoH both serve over
 # HTTP/1.1 fine. The TLS backend comes from the `tls-*` features above, not here.
 reqwest = { version = "0.13.4", default-features = false, features = ["json"] }
+# Only pulled by `tls-rustls` (Android) — see `crate::tls`. Versions track what
+# reqwest's `rustls` feature already resolves, so this adds no new tree on that
+# path and nothing at all on the desktop `tls-native` default.
+rustls = { version = "0.23", optional = true }
+webpki-roots = { version = "1", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 time = { version = "0.3.55", features = ["formatting", "parsing", "local-offset"] }

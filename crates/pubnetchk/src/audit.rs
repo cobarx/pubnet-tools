@@ -154,7 +154,9 @@ pub async fn run_audit_with_probe<P: PlatformProbe>(probe: &P, options: RunAudit
         sp.set_message("Analyzing...");
     }
 
-    let http_client = reqwest::Client::new();
+    let http_client = crate::tls::client_builder()
+        .build()
+        .expect("building the default HTTP client should never fail");
     let (security, reliability, speed) = tokio::join!(
         async {
             if should_run(CheckName::Security) {

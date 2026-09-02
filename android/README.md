@@ -7,12 +7,13 @@ network this phone is joined to, reusing the Rust engine through a UniFFI
 
 **Walking-skeleton scope:** only **topology** and **security** run. Reliability
 needs an unprivileged-ICMP path and speed needs the NDT7 client validated over
-rustls (epic tickets 6–7). The DNS-leak verdict is `uncertain` on Android — the
-engine cannot see the resolver's egress IP (same as macOS / Windows).
-
-This ticket-4 step wires the build and ships a blank screen that only calls
-`reportSchemaVersion()` across the bridge; the real Scan screen and the
-`NetworkFacts` collector are ticket 5.
+rustls (epic tickets 6–7). The DoH sub-probe works, validating against the
+`webpki-roots` CA bundle (`crates/pubnetchk/src/tls.rs`) — reqwest's `rustls`
+feature hard-links `rustls-platform-verifier`, which `abort()`s the process on
+Android with no JVM `Context`, so reqwest is handed a preconfigured
+`ClientConfig` instead. Using the device trust store is epic ticket 9. The
+DNS-leak verdict stays `uncertain` regardless — the engine cannot see the
+resolver's egress IP on Android (same as macOS / Windows).
 
 ## Prerequisites
 
@@ -66,8 +67,7 @@ only needs the `extern "C"` entry points, which survive stripping. See
 
 The generated Kotlin binds to the `.so` through JNA
 (`net.java.dev.jna:jna:…@aar`). `runAuditJson` **blocks** for the length of the
-audit — call it off the main thread (ticket 5's `AuditViewModel` uses
-`Dispatchers.IO`).
+audit — `AuditViewModel` calls it on `Dispatchers.IO`.
 
 ## 16 KB page size
 

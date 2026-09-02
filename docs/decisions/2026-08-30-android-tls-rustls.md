@@ -65,15 +65,41 @@ reqwest 0.13's `rustls` feature is not just "rustls." It brings:
   toolchain plus `cmake` must be on `PATH` when cross-compiling; both are
   owner-installed prerequisites, see the epic).
 - **`rustls-platform-verifier`** for certificate validation against the OS trust
-  store. On Android this verifier needs a JVM + `Context` handle; wiring that
-  from the cdylib (via `ndk-context` / an `init` call from Kotlin) is
-  **ticket 3's** responsibility, not this decision's.
+  store. It is linked but **not used** on this path — see the update below.
 
-`tokio-tungstenite` is set to **`rustls-tls-webpki-roots`** instead — the
-WebSocket path then validates against the bundled Mozilla root set and needs no
-JVM context, which keeps the NDT7 speed test working before the platform
-verifier is wired. Both paths share the `aws-lc-rs` provider (rustls's default),
-so there is one crypto backend in the binary.
+`tokio-tungstenite` is set to **`rustls-tls-webpki-roots`** — the WebSocket path
+validates against the bundled Mozilla root set and needs no JVM context. Both
+paths share the `aws-lc-rs` provider (rustls's default), so there is one crypto
+backend in the binary.
+
+### Update (2026-09-02): reqwest also uses webpki-roots, not the platform verifier
+
+Shipping ticket 5 surfaced that `rustls-platform-verifier` does not degrade
+gracefully: on Android it **`abort()`s the process** ("Expect
+rustls-platform-verifier to be initialized") the first time reqwest builds a TLS
+config, because the cdylib is loaded through JNA (not `System.loadLibrary`), so
+no JVM `Context` is ever registered. With the workspace `panic = "abort"` this
+took the whole app down before the security check could run — not a catchable
+error.
+
+Fix (`crates/pubnetchk/src/tls.rs`): on the `tls-rustls` path, build the
+`reqwest::Client` with `use_preconfigured_tls(ClientConfig)` where the config
+uses `webpki-roots` (Mozilla's CA bundle — the same roots the WebSocket path
+already uses). reqwest then never constructs the platform verifier. `tls-native`
+is unchanged; when a workspace-wide `cargo` run unifies both features,
+`tls-native` wins the `#[cfg]`, so only the standalone Android build takes the
+webpki path.
+
+This is exactly the "Revisit if → reqwest gains a webpki-roots feature" case,
+reached by a different route: reqwest has no such feature, but
+`use_preconfigured_tls` gets the same result. `rustls` + `webpki-roots` are now
+optional direct deps of `pubnet-tools`, enabled only by `tls-rustls` (they track
+the versions reqwest's `rustls` feature already resolves — no new desktop tree).
+
+**Still true:** DoH validates against Mozilla roots, not the device's
+user/enterprise trust store. Wiring the platform verifier for that is
+[epic ticket 9](../epics/pubnet-android/tickets/009-rustls-platform-verifier-context.md)
+— now an enhancement, not a crash fix.
 
 ## Alternatives considered
 
@@ -87,15 +113,16 @@ so there is one crypto backend in the binary.
   Deferred as a possible follow-up if `aws-lc-sys` cross-compilation proves
   painful.
 - **webpki-roots for reqwest too** — reqwest 0.13 exposes no webpki-roots
-  feature (unlike tokio-tungstenite); `rustls` always means the platform
-  verifier. Nothing to choose here.
+  *feature*, but `ClientBuilder::use_preconfigured_tls(rustls::ClientConfig)`
+  reaches the same place. This is what the 2026-09-02 update above actually does.
 
 ## Revisit if
 
 - `aws-lc-sys` cross-compilation to the Android ABIs is a recurring build
   problem → switch to the `ring` provider via `rustls-no-provider`.
-- reqwest gains a webpki-roots feature → drop `rustls-platform-verifier` and the
-  Android-context wiring entirely, matching the WebSocket path.
+- The DoH probe needs the device's user/enterprise CAs (not just Mozilla roots)
+  → wire `rustls-platform-verifier` with a JVM `Context` (epic ticket 9) and
+  drop the `use_preconfigured_tls` override.
 - A desktop target ever loses a working system TLS stack → reconsider making
   rustls the default everywhere.
 
