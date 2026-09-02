@@ -8,12 +8,16 @@
   },
   "remoteUser": "dev",
   "runArgs": ["--name", "pubnet-tools-dev"],
+  "workspaceMount": "source=${localWorkspaceFolder},target=/home/dev/code/pubnet-tools,type=bind",
+  "workspaceFolder": "/home/dev/code/pubnet-tools",
   "mounts": [
     "source=pubnet-tools-cargo-registry,target=/home/dev/.cargo/registry,type=volume",
-    "source=pubnet-tools-target,target=/workspaces/pubnet-tools/target,type=volume",
+    "source=pubnet-tools-target,target=/home/dev/code/pubnet-tools/target,type=volume",
     "source=claude-code-config-${devcontainerId},target=/home/dev/.claude,type=volume",
     "source=${localEnv:SSH_AUTH_SOCK},target=/ssh-agent,type=bind",
-    "source=${localEnv:HOME}/.ssh/known_hosts,target=/home/dev/.ssh/known_hosts,type=bind,readonly"
+    "source=${localEnv:HOME}/.ssh/known_hosts,target=/home/dev/.ssh/known_hosts,type=bind,readonly",
+    "source=${localEnv:HOME}/code/dotfiles-cobarx,target=/home/dev/code/dotfiles-cobarx,type=bind",
+    "source=${localEnv:HOME}/code/ai-skills-cobarx,target=/home/dev/code/ai-skills-cobarx,type=bind"
   ],
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/dev/.claude"
@@ -21,7 +25,7 @@
   "remoteEnv": {
     "SSH_AUTH_SOCK": "/ssh-agent"
   },
-  "postCreateCommand": "sudo chown -R dev:dev /home/dev/.cargo/registry /home/dev/.claude /workspaces/pubnet-tools/target && cargo fetch",
+  "postCreateCommand": "sudo chown -R dev:dev /home/dev/.cargo/registry /home/dev/.claude /home/dev/code/pubnet-tools/target && cargo fetch",
   "customizations": {
     "vscode": {
       "extensions": [

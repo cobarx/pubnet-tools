@@ -66,9 +66,37 @@ later, chown it the same way before anything writes there.
 
 ## File sharing with the host
 
-**The workspace itself is automatic**: the project folder is bind-mounted at
-`/workspaces/pubnet-tools`, so edits on either side (host editor, container
-shell) are the same files instantly — no config, no copying.
+**The workspace itself is automatic**: the project folder is bind-mounted,
+so edits on either side (host editor, container shell) are the same files
+instantly — no config, no copying. It lands at `/home/dev/code/pubnet-tools`
+rather than the Dev Containers default of `/workspaces/pubnet-tools` — see
+[Sibling repos](#sibling-repos-dotfiles-cobarx-and-ai-skills-cobarx) below
+for why.
+
+### Sibling repos: dotfiles-cobarx and ai-skills-cobarx
+
+Two more repos are bind-mounted alongside pubnet-tools, from the same `~/code`
+layout on the host:
+
+```json
+"workspaceMount": "source=${localWorkspaceFolder},target=/home/dev/code/pubnet-tools,type=bind",
+"workspaceFolder": "/home/dev/code/pubnet-tools",
+"mounts": [
+  "source=${localEnv:HOME}/code/dotfiles-cobarx,target=/home/dev/code/dotfiles-cobarx,type=bind",
+  "source=${localEnv:HOME}/code/ai-skills-cobarx,target=/home/dev/code/ai-skills-cobarx,type=bind"
+]
+```
+
+This is why pubnet-tools itself moved off the Dev Containers default
+`/workspaces/pubnet-tools` path — `workspaceMount`/`workspaceFolder`
+override it so all three repos sit as true siblings under `/home/dev/code/`,
+matching the host's own `~/code/<repo>` layout exactly. `${localEnv:HOME}`
+keeps this portable across machines rather than hardcoding this machine's
+home directory.
+
+Verified: `git status`/`git log` work cleanly for all three from inside the
+container — same healthy `.git` directories as the host, since these are
+bind mounts, not copies.
 
 **SSH agent forwarding** is wired up in `devcontainer.json`:
 
