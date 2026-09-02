@@ -82,7 +82,7 @@ missing tool, stop and hand it back to the owner.
 | 4 | Android Studio project + Gradle/Rust wiring | feature | 5 | in-review | tbd | tbd |
 | 5 | `NetworkFacts` collector + Compose skeleton screen | feature | 5 | in-review | tbd | tbd |
 | 6 | Reliability on Android — unprivileged ICMP | feature | 5 | in-review | tbd | tbd |
-| 7 | Speed / NDT7 on Android — validate over rustls | feature | 3 | deferred | tbd | none |
+| 7 | Speed / NDT7 on Android — validate over rustls | feature | 3 | in-review | tbd | tbd |
 | 8 | CI: build `pubnetchk-android` + `assembleDebug` | chore | 2 | deferred | tbd | none |
 | 9 | DoH validation against the device trust store (platform verifier + JVM `Context`) | feature | 3 | deferred | tbd | none |
 | 10 | Cellular / mobile-network facts in the snapshot + UI | feature | 3 | deferred | tbd | none |
@@ -101,8 +101,10 @@ Walking-skeleton points (1–5): `20`
 - Ticket 4 needs 3 (there must be a crate to build a `.so` from).
 - Ticket 5 needs 4. This is the ticket that produces a running app.
 - Tickets 6–10 follow the skeleton in any order; 6, 7 and 9 each open with a
-  decision doc before implementation. Ticket 6 (reliability) is done —
-  unprivileged datagram ICMP. Ticket 9 is an enhancement (DoH against the
+  decision doc before implementation. Tickets 6 (reliability — unprivileged
+  datagram ICMP) and 7 (speed — NDT7 auto-selects rustls/webpki when native-tls
+  is absent) are done; all four checks now run on Android. Ticket 9 is an
+  enhancement (DoH against the
   device trust store instead of the bundled Mozilla roots), not a blocker — the
   skeleton's DoH probe already works via `webpki-roots` (`crate::tls`). Ticket 10
   extends the snapshot to cellular so the app is useful (and not misleading) off
@@ -120,6 +122,9 @@ Walking-skeleton points (1–5): `20`
 - `docs/decisions/2026-09-02-android-unprivileged-icmp.md` (ticket 6) — datagram
   ICMP socket (`SOCK_DGRAM`/`IPPROTO_ICMP`, unprivileged on Android) vs
   `SOCK_RAW` vs `/system/bin/ping` vs TCP-connect latency.
+- `docs/decisions/2026-09-02-android-ndt7-rustls.md` (ticket 7) — `connect_async`
+  auto-selects rustls + webpki-roots for the NDT7 WebSocket when `native-tls` is
+  absent; no explicit `Connector` needed.
 - (ticket 9) `docs/decisions/<date>-android-rustls-platform-verifier.md` — how
   the rustls platform verifier gets its JVM `Context` (JNI init vs `ndk_context`
   vs UniFFI-exported init), to validate DoH against the device trust store. The

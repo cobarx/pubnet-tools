@@ -40,9 +40,10 @@ impl std::fmt::Display for AuditError {
 
 impl std::error::Error for AuditError {}
 
-/// Options from the Kotlin side. All fields optional; the default runs the
-/// checks that work on Android today (topology + security + reliability; speed
-/// is opt-in — the caller adds `"speed"` to `only`).
+/// Options from the Kotlin side. All fields optional; the default runs all four
+/// checks (the NDT7 speed test works over rustls/webpki-roots — see
+/// `docs/decisions/2026-09-02-android-ndt7-rustls.md`). A caller that wants a
+/// quick scan passes e.g. `only: ["topology", "security", "reliability"]`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct AndroidOptions {
@@ -63,6 +64,7 @@ impl Default for AndroidOptions {
                 "topology".to_string(),
                 "security".to_string(),
                 "reliability".to_string(),
+                "speed".to_string(),
             ],
             speed_duration_secs: 10,
             wifi_detail: true,
@@ -167,5 +169,21 @@ mod tests {
         let err = run_audit_json(SNAPSHOT.to_string(), r#"{ "only": ["bogus"] }"#.to_string())
             .unwrap_err();
         assert!(matches!(err, AuditError::BadOptions { .. }));
+    }
+
+    #[test]
+    fn default_options_select_all_four_checks() {
+        // `"{}"` -> AndroidOptions::default(); every name must be a real check.
+        let opts: AndroidOptions = serde_json::from_str("{}").unwrap();
+        let checks: Vec<CheckName> = opts.only.iter().filter_map(|s| check_name(s)).collect();
+        assert_eq!(checks.len(), 4);
+        for c in [
+            CheckName::Topology,
+            CheckName::Security,
+            CheckName::Reliability,
+            CheckName::Speed,
+        ] {
+            assert!(checks.contains(&c), "default `only` missing {c:?}");
+        }
     }
 }

@@ -35,7 +35,8 @@ Non-root everywhere — nothing in `pubnetchk` requests elevated privileges.
   over the Rust engine via a UniFFI cdylib (`crates/pubnetchk-android`). Cannot shell
   out — Kotlin gathers a `HostSnapshot` from framework APIs and `SnapshotProbe` answers
   from it. Skeleton (tickets 1–5) was topology + security; ticket 6 added
-  reliability (unprivileged datagram ICMP). Speed is ticket 7.
+  reliability (datagram ICMP) and 7 speed (NDT7 auto-selects rustls/webpki). All
+  four checks now run on Android.
 
 ## Architecture
 
@@ -183,7 +184,10 @@ cd android && ./gradlew :app:testDebugUnitTest    # JVM unit tests (report-JSON 
 The Gradle build cross-compiles the cdylib and regenerates the bindings itself (the
 `cargo` block + `generateUniffiBindings`, both `preBuild` deps) — the `just` recipes are
 for iterating on the Rust side without Gradle. Walking-skeleton scope (epic tickets 1–5):
-**topology + security + reliability** (speed is ticket 7). On the `tls-rustls` path `crate::tls` builds reqwest with a
+**all four checks** (reliability via `net_icmp`, speed's NDT7 WebSocket auto-picks
+rustls/webpki when native-tls is absent —
+[2026-09-02-android-ndt7-rustls.md](docs/decisions/2026-09-02-android-ndt7-rustls.md)).
+On the `tls-rustls` path `crate::tls` builds reqwest with a
 `webpki-roots` `ClientConfig` — reqwest's `rustls` feature hard-links
 `rustls-platform-verifier`, which `abort()`s the process on Android with no JVM
 `Context`; using the device trust store instead is epic ticket 9. On-device / emulator
