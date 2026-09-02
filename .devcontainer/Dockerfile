@@ -25,6 +25,8 @@ RUN microdnf install -y dnf && microdnf clean all
 #   glow                 - terminal markdown renderer, for reading docs/*.md in place
 #                          (Fedora package since F43 - hence fedora-minimal:44, not :42)
 #   zsh                  - login shell for the dev user, set below
+#   procps-ng            - provides `ps` (and top/free/etc.) - not in fedora-minimal by default
+#   bc                   - calculator, for ad-hoc arithmetic in shell one-liners
 RUN dnf install -y \
         gcc \
         openssl-devel \
@@ -39,6 +41,8 @@ RUN dnf install -y \
         vim \
         glow \
         zsh \
+        procps-ng \
+        bc \
     && dnf clean all
 
 # Non-root user with passwordless sudo. Dev Containers convention, and also
