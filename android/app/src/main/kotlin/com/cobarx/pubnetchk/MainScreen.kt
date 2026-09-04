@@ -147,6 +147,14 @@ private fun ReportView(
                 WifiNameRow(wifiName, onFixWifiName)
             }
             KeyValue("Encryption", sec.encryption ?: "Unknown")
+            // Format matches the CLI renderer: "153 (5765 MHz)".
+            if (sec.channel != null) {
+                val freq = sec.frequencyMhz?.let { " ($it MHz)" } ?: ""
+                KeyValue("Channel", "${sec.channel}$freq")
+            }
+            if (sec.signalPercent != null) {
+                KeyValue("Signal", "${sec.signalPercent}%")
+            }
             KeyValue("DNS servers", sec.dns?.servers?.joinToString(", ").orEmpty().ifBlank { "—" })
             val leak = sec.dnsLeak
             if (leak != null) {
