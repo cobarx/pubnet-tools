@@ -92,3 +92,8 @@ Motivated by on-device review of the ticket-5 skeleton — the app is Wi-Fi-shap
 and says nothing useful when the phone drops to LTE. Keep it factual: this tool
 audits the *network you joined*; on cellular that's mostly "who's your carrier
 and is DNS being messed with", not a security verdict.
+
+This ticket is **facts only**. The performance-advice surface and the
+Wi-Fi + cellular audit tabs are [ticket 011](011-cellular-performance-and-tabs.md);
+the full fact/advice inventory is in
+[`docs/context/cellular-mobile-network.md`](../../context/cellular-mobile-network.md).

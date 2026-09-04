@@ -308,6 +308,7 @@ runs are not covered by the dev container (no adb device, no KVM). See
   - [nat-traversal.md](docs/context/nat-traversal.md) — how Tailscale punches through NAT; DERP relay fallback
   - [tailscale-wireguard-handshake.md](docs/context/tailscale-wireguard-handshake.md) — WireGuard Noise_IKpsk2 handshake walkthrough
   - [wpa3-driver-compatibility.md](docs/context/wpa3-driver-compatibility.md) — WPA3/SAE driver failure on Intel AC 9560 against AT&T transition-mode AP; motivating incident for `wifi-auth-protocol-detection`
+  - [cellular-mobile-network.md](docs/context/cellular-mobile-network.md) — what an unprivileged Android app can read about a mobile-data link (signal, band, carrier, roaming, Data Saver) and turn into performance advice; feeds pubnet-android tickets 10–11
 - [docs/epics/](docs/epics/) — epic + ticket breakdown for multi-PR features; source of truth for planned work
   - [wifi-auth-protocol/epic.md](docs/epics/wifi-auth-protocol/epic.md) — Wi-Fi auth protocol detection (WPA2-PSK vs WPA3-SAE vs transition mode); **abandoned** — superseded by pubnetdiag
   - [pubnetdiag/epic.md](docs/epics/pubnetdiag/epic.md) — Wi-Fi AP scanner binary (`pubnetdiag`); BSS scan + RSN IE parser + `--repair`; 4 tickets, 21 pts
