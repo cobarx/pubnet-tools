@@ -11,20 +11,40 @@ topology — and prints a scored terminal report.
 
 ![pubnetchk running a full audit in a terminal, then printing a scored Network / Security / Performance report](docs/assets/demo.gif)
 
+## Table of contents
+
+- [What it does](#what-it-does)
+- [How it works](#how-it-works)
+- [Installing](#installing)
+- [Usage](#usage)
+- [Platform support](#platform-support)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## What it does
 
 Runs four checks and scores the result Low / Medium / High risk:
 
 - **Security** — WiFi encryption (WPA3/WPA2/Open), DNS interception via DNS-over-HTTPS, captive portal detection
 - **Speed** — download, upload, latency, jitter via M-Lab's open NDT7 protocol
-- **Reliability** — ping/jitter/packet loss to your gateway (the router you're connected to) and two well-known public DNS servers: Google's `8.8.8.8` and Cloudflare's `1.1.1.1`
+- **Reliability** — ping/jitter/packet loss to your gateway and two public DNS resolvers (Google's `8.8.8.8`, Cloudflare's `1.1.1.1`)
 - **Topology** — passive ARP cache (no active scanning)
 
-Nothing here needs root, and topology is passive-only — it reads the ARP cache, it
-never scans. pubnetchk reports what it finds; it doesn't fix it. If a run flags
-something about the DNS resolver you're using,
-[docs/context/dns-hardening.md](docs/context/dns-hardening.md) covers what that actually
-means and how to change it.
+pubnetchk reports what it finds — it doesn't fix it. If a run flags your DNS
+resolver, [docs/context/dns-hardening.md](docs/context/dns-hardening.md) covers
+what that means and how to change it.
+
+## How it works
+
+pubnetchk reads what your OS already knows about the network — `ip`/`nmcli` on
+Linux, the Win32 API on Windows, `route`/`ifconfig`/`scutil` on macOS — rather
+than capturing packets or actively scanning. That's why it never needs
+root/admin, and why topology only ever sees what's already in the ARP cache.
+Security and speed are the exception: DNS-over-HTTPS probes and an M-Lab NDT7
+speed test talk to the network directly to run the audit itself. See
+[docs/decisions/](docs/decisions/) for the reasoning behind each platform's
+approach.
 
 ## Installing
 
@@ -51,9 +71,8 @@ cargo build --release        # optimized binary at target/release/pubnetchk
 cargo build                  # faster debug build at target/debug/pubnetchk
 ```
 
-Runtime prerequisites vary by OS — see [Platform support](#platform-support) below,
-and [Development](#development) for the extra build-time setup each platform needs
-(Linux OpenSSL headers, the Windows GNU toolchain, etc.).
+Extra build-time setup per OS (Linux OpenSSL headers, the Windows GNU toolchain,
+etc.) is in [Development](#development).
 
 ## Usage
 
@@ -103,15 +122,15 @@ Full flag reference: `pubnetchk --help`.
 ## Platform support
 
 | | Linux | macOS | Windows 10+ | Android |
-|---|---|---|---|---|
-| How it reads the network | `ip`, `nmcli`, `resolvectl` | `route`, `ifconfig`, `arp`, `scutil` | Win32 API directly (no shelling out) | Kotlin gathers facts, Rust engine via UniFFI |
-| Needs root/admin | No | No | No | No |
-| WiFi SSID | Yes | Redacted unless you grant Location Services | Yes | Yes |
-| DNS-interception verdict | `clean`/`leaked` | `uncertain` (no egress-IP read) | `uncertain` (no egress-IP read) | `uncertain` |
-| `pubnetchk record` | Yes (asciinema) | Yes (asciinema) | No — use Windows Terminal's own capture, or run under WSL | n/a (no CLI) |
-| Extra build-time setup | OpenSSL dev headers | Xcode CLI tools | GNU toolchain (see [Development](#development)) | See [android/README.md](android/README.md) |
+|---|:---:|:---:|:---:|:---:|
+| WiFi SSID | &nbsp;✅&nbsp; | &nbsp;✅¹&nbsp; | &nbsp;✅&nbsp; | &nbsp;✅&nbsp; |
+| DNS-interception verdict | &nbsp;✅&nbsp; | &nbsp;🟡²&nbsp; | &nbsp;🟡²&nbsp; | &nbsp;🟡²&nbsp; |
 
-The Android app is in progress — see [docs/epics/pubnet-android/](docs/epics/pubnet-android/).
+¹ Redacted unless you grant Location Services (macOS 15+).
+² Reports `uncertain` rather than `clean`/`leaked` — no egress-IP read on this platform.
+
+The Android app (a UniFFI-wrapped build of the same engine, no CLI) is in progress —
+see [docs/epics/pubnet-android/](docs/epics/pubnet-android/).
 
 ## Development
 
@@ -173,8 +192,7 @@ scoop install mingw                                  # puts dlltool.exe on PATH
 ```
 
 The override is deliberately local — don't commit a `rust-toolchain.toml`, or you'd
-force the GNU toolchain on Linux/macOS contributors too. On Windows, `record` is
-unsupported and DNS-interception detection reports `uncertain`.
+force the GNU toolchain on Linux/macOS contributors too.
 
 ### Building
 
@@ -194,32 +212,17 @@ in PowerShell you can also use `cargo build` / `cargo build --release` directly.
 
 ### Regenerating the demo GIF
 
-The GIF at the top of this README is a real `pubnetchk -q -v` run, captured with
-[asciinema](https://asciinema.org/) and rendered with
-[agg](https://github.com/asciinema/agg) (both installable via `cargo install`, no
-system packages needed):
+See [docs/context/regenerating-demo-gif.md](docs/context/regenerating-demo-gif.md).
 
-```bash
-asciinema rec --window-size 100x24 --idle-time-limit 1 \
-  -c "./target/release/pubnetchk -q -v" demo-raw.cast
+## Contributing
 
-# drop redundant spinner frames instead of speeding up playback —
-# see scripts/trim-demo-cast.py for what "redundant" means here
-python3 scripts/trim-demo-cast.py demo-raw.cast demo-trimmed.cast
-
-agg --theme github-dark --font-size 15 --rows 24 --last-frame-duration 11.6 demo-trimmed.cast docs/assets/demo.gif
-```
-
-Redact anything network-identifying (your real SSID, in particular) out of the
-`.cast` file before rendering — it's plain JSON, a text substitution is enough.
-
-## Open source
-
-pubnetchk itself is MIT. Every dependency is required to carry a compatible open source
-license — see [docs/decisions/2026-08-02-open-source-only.md](docs/decisions/2026-08-02-open-source-only.md)
-for why, and `Cargo.toml` for the current dependency list rather than a copy here that
-can go stale.
+Issues and PRs welcome — see [CLAUDE.md](CLAUDE.md) for this repo's conventions
+(spec-driven, test-driven, real-capture fixtures) before touching a check or a
+platform probe.
 
 ## License
 
-MIT
+MIT, including every dependency — see
+[docs/decisions/2026-08-02-open-source-only.md](docs/decisions/2026-08-02-open-source-only.md)
+for why, and `Cargo.toml` for the current dependency list rather than a copy here
+that can go stale.
