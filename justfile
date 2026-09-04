@@ -58,3 +58,8 @@ android-apk:
 # Android JVM unit tests (the report-JSON parser).
 android-test:
     cd android && ./gradlew :app:testDebugUnitTest
+
+# Validate the Android TLS path: the NDT7 locate GET + WebSocket over
+# rustls/webpki-roots (the feature set the shipped cdylib uses). Live network.
+test-speed-rustls:
+    cargo test -p pubnet-tools --no-default-features --features tls-rustls --test speed
