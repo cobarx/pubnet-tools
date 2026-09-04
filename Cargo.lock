@@ -1134,7 +1134,7 @@ dependencies = [
 
 [[package]]
 name = "pubnet-platform"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "regex",
  "serde",
@@ -1146,7 +1146,7 @@ dependencies = [
 
 [[package]]
 name = "pubnet-tools"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "console",
@@ -1168,7 +1168,7 @@ dependencies = [
 
 [[package]]
 name = "pubnetchk-android"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "pubnet-platform",
  "pubnet-tools",
@@ -1180,7 +1180,7 @@ dependencies = [
 
 [[package]]
 name = "pubnetdiag"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "pubnet-platform",
