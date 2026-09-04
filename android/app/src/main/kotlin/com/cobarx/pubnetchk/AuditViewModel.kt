@@ -17,10 +17,7 @@ import uniffi.pubnetchk_android.runAuditJson
 /**
  * Drives one audit: gather `HostSnapshot` from framework APIs → `runAuditJson`
  * (blocking, on `Dispatchers.IO`) → parse the report JSON → expose UI state.
- *
- * Skeleton scope: only `topology` + `security` run (reliability needs an
- * unprivileged-ICMP path, speed needs NDT7 validated over rustls — epic
- * tickets 6/7).
+ * All four checks run (topology, security, reliability, speed).
  */
 class AuditViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -34,19 +31,16 @@ class AuditViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
-                    val snapshot = NetworkFacts.collect(getApplication())
-                    val snapshotJson = NetworkFacts.toJson(snapshot)
-                    val optionsJson = Json.encodeToString(
-                        AndroidOptions.serializer(),
-                        AndroidOptions(only = listOf("topology", "security")),
-                    )
+                    val facts = NetworkFacts.collect(getApplication())
+                    val snapshotJson = NetworkFacts.toJson(facts.snapshot)
+                    val optionsJson = Json.encodeToString(AndroidOptions.serializer(), AndroidOptions())
                     Log.d(TAG, "snapshot: $snapshotJson")
 
                     val reportJson = runAuditJson(snapshotJson, optionsJson)
                     Log.d(TAG, "report: $reportJson")
 
                     val report = ReportJson.decoder.decodeFromString(Report.serializer(), reportJson)
-                    AuditUiState.Done(report)
+                    AuditUiState.Done(report, facts.wifiName)
                 } catch (e: AuditException) {
                     AuditUiState.Error("The audit engine rejected the request: ${e.message}")
                 } catch (e: Exception) {
@@ -66,6 +60,6 @@ class AuditViewModel(app: Application) : AndroidViewModel(app) {
 sealed interface AuditUiState {
     data object Idle : AuditUiState
     data object Running : AuditUiState
-    data class Done(val report: Report) : AuditUiState
+    data class Done(val report: Report, val wifiName: WifiNameStatus) : AuditUiState
     data class Error(val message: String) : AuditUiState
 }

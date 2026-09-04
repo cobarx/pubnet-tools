@@ -2,12 +2,15 @@ package com.cobarx.pubnetchk
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -18,6 +21,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -25,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -32,6 +37,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 @Composable
 fun MainScreen(
     onScan: () -> Unit,
+    onFixWifiName: (WifiNameStatus) -> Unit = {},
     viewModel: AuditViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -44,7 +50,7 @@ fun MainScreen(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("pubnetchk", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text("Pubnet Tools", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
                 "Audit the Wi-Fi / network this phone just joined.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -61,13 +67,30 @@ fun MainScreen(
 
             when (val s = state) {
                 AuditUiState.Idle -> Unit
-                AuditUiState.Running -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(modifier = Modifier.height(20.dp))
-                    Spacer(Modifier.height(0.dp))
-                    Text("  Running topology + security…")
+                AuditUiState.Running -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            "Running checks…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            "The speed test takes about 25 seconds.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 is AuditUiState.Error -> ErrorCard(s.message)
-                is AuditUiState.Done -> ReportView(s.report)
+                is AuditUiState.Done -> ReportView(s.report, s.wifiName, onFixWifiName)
             }
         }
     }
@@ -88,7 +111,11 @@ private fun ErrorCard(message: String) {
 }
 
 @Composable
-private fun ReportView(report: Report) {
+private fun ReportView(
+    report: Report,
+    wifiName: WifiNameStatus,
+    onFixWifiName: (WifiNameStatus) -> Unit,
+) {
     RiskBadge(report.score.level, report.score.total)
 
     SectionCard("Network") {
@@ -109,7 +136,11 @@ private fun ReportView(report: Report) {
         if (sec == null) {
             Text(report.security.errors.firstOrNull() ?: "No security data.")
         } else {
-            KeyValue("Wi-Fi", sec.ssid ?: "(name hidden — grant location to show)")
+            if (sec.ssid != null) {
+                KeyValue("Wi-Fi", sec.ssid)
+            } else {
+                WifiNameRow(wifiName, onFixWifiName)
+            }
             KeyValue("Encryption", sec.encryption ?: "Unknown")
             KeyValue("DNS servers", sec.dns?.servers?.joinToString(", ").orEmpty().ifBlank { "—" })
             val leak = sec.dnsLeak
@@ -211,10 +242,47 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
+private fun WifiNameRow(status: WifiNameStatus, onFix: (WifiNameStatus) -> Unit) {
+    val (text, action) = when (status) {
+        WifiNameStatus.NO_PERMISSION ->
+            "name hidden — location permission not granted" to "Grant location permission"
+        WifiNameStatus.LOCATION_OFF ->
+            "name hidden — system Location is off" to "Open Location settings"
+        WifiNameStatus.HIDDEN_OR_UNAVAILABLE ->
+            "name unavailable (hidden SSID, or withheld by the OS)" to null
+        WifiNameStatus.NOT_WIFI -> "not on Wi-Fi" to null
+        WifiNameStatus.VISIBLE -> "" to null // unreachable: caller shows the SSID
+    }
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(
+            "Wi-Fi: $text",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (action != null) {
+            TextButton(onClick = { onFix(status) }, contentPadding = PaddingValues(0.dp)) {
+                Text(action)
+            }
+        }
+    }
+}
+
+@Composable
 private fun KeyValue(key: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(key, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(
+            key,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 12.dp),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

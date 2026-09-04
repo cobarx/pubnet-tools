@@ -97,7 +97,8 @@ pubnet-tools/
                            armeabi-v7a / x86_64; `generateUniffiBindings` emits the Kotlin
                            into build/generated/uniffi (wired as a preBuild dep)
     app/src/main/kotlin/com/cobarx/pubnetchk/
-      MainActivity.kt      hosts the Compose screen; requests ACCESS_FINE_LOCATION
+      MainActivity.kt      hosts the Compose screen; Scan runs immediately, the
+                           ACCESS_FINE_LOCATION request is a separate opt-in (SSID only)
       NetworkFacts.kt      builds the HostSnapshot from ConnectivityManager / WifiManager /
                            LinkProperties / /proc/net/arp — the Kotlin side of the seam
       AuditViewModel.kt    gather facts -> runAuditJson (Dispatchers.IO) -> parse -> UI state
