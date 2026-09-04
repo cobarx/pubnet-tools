@@ -285,7 +285,7 @@ runs are not covered by the dev container (no adb device, no KVM). See
     `wifi-info-detection`, `wifi-auth-protocol-detection`, `pubnetdiag-scan`
 - [docs/decisions/](docs/decisions/) — why key architectural and technology choices
   were made; read before changing a dependency, adding a check, or adding a platform
-  - [2026-08-02-open-source-only.md](docs/decisions/2026-08-02-open-source-only.md) — MIT/Apache/ISC only; why Ookla and fast.com are excluded
+  - [2026-08-02-open-source-only.md](docs/decisions/2026-08-02-open-source-only.md) — any compatible open source license (permissive preferred, compatible copyleft OK); why Ookla and fast.com are excluded
   - [2026-08-02-passive-topology.md](docs/decisions/2026-08-02-passive-topology.md) — why no active scanning; what passive ARP gives us
   - [2026-08-02-technology-stack.md](docs/decisions/2026-08-02-technology-stack.md) — original (TS) runtime-dependency rationale
   - [2026-08-02-dns-leak-detection.md](docs/decisions/2026-08-02-dns-leak-detection.md) — why DoH, why Cloudflare+Google only, why `uncertain` beats a false negative
