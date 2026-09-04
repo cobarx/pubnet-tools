@@ -3,9 +3,11 @@ package com.cobarx.pubnetchk
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.LinkAddress
 import android.net.LinkProperties
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.RouteInfo
 import android.net.wifi.WifiInfo
@@ -13,11 +15,15 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.net.Inet4Address
+import kotlin.coroutines.resume
 
 /**
  * Gathers the `HostSnapshot` the Rust engine's `SnapshotProbe` is fed — the
@@ -33,11 +39,14 @@ object NetworkFacts {
 
     private val json = Json { encodeDefaults = true; explicitNulls = true }
 
-    fun collect(context: Context): HostSnapshot {
+    /** The snapshot plus why the Wi-Fi name is (or isn't) present, for the UI. */
+    data class Facts(val snapshot: HostSnapshot, val wifiName: WifiNameStatus)
+
+    suspend fun collect(context: Context): Facts {
         val cm = context.getSystemService(ConnectivityManager::class.java)
-            ?: return HostSnapshot() // no ConnectivityManager -> empty snapshot; topology skips
+            ?: return Facts(HostSnapshot(), WifiNameStatus.NOT_WIFI)
         val network = cm.activeNetwork
-            ?: return HostSnapshot() // airplane mode / no network -> defaultRoute stays null (spec S4)
+            ?: return Facts(HostSnapshot(), WifiNameStatus.NOT_WIFI)
         val caps = cm.getNetworkCapabilities(network)
         val link = cm.getLinkProperties(network)
 
@@ -48,13 +57,18 @@ object NetworkFacts {
         // Kotlin sees the gateway before the ARP scan; the Rust side re-checks it.
         val gatewayIp = defaultRoute?.gateway
 
-        return HostSnapshot(
-            defaultRoute = defaultRoute,
-            interfaceAddr = link?.let { interfaceAddr(it) },
-            arpNeighbors = readArpTable(iface, gatewayIp),
-            wifi = if (kind == "wifi") wifiFacts(context, cm, network) else null,
-            dns = link?.let { dnsFacts(it) },
-            interfaceKind = kind,
+        val wifi = if (kind == "wifi") wifiFacts(context, cm) else null
+
+        return Facts(
+            HostSnapshot(
+                defaultRoute = defaultRoute,
+                interfaceAddr = link?.let { interfaceAddr(it) },
+                arpNeighbors = readArpTable(iface, gatewayIp),
+                wifi = wifi?.first,
+                dns = link?.let { dnsFacts(it) },
+                interfaceKind = kind,
+            ),
+            wifi?.second ?: WifiNameStatus.NOT_WIFI,
         )
     }
 
@@ -95,26 +109,42 @@ object NetworkFacts {
 
     // --- Wi-Fi ---
 
-    private fun wifiFacts(
+    private suspend fun wifiFacts(
         context: Context,
         cm: ConnectivityManager,
-        network: android.net.Network,
-    ): SnapshotWifi {
-        val hasLocation = ContextCompat.checkSelfPermission(
+    ): Pair<SnapshotWifi, WifiNameStatus> {
+        val hasPermission = ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_FINE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
+        val locationOn = context.getSystemService(LocationManager::class.java)
+            ?.let { LocationManagerCompat.isLocationEnabled(it) } ?: false
 
-        val info: WifiInfo? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            (cm.getNetworkCapabilities(network)?.transportInfo as? WifiInfo)
-        } else {
-            @Suppress("DEPRECATION")
+        // A synchronous `getNetworkCapabilities().transportInfo` returns a
+        // WifiInfo with SSID/BSSID *always redacted* on API 31+. Only a WifiInfo
+        // delivered to a registered NetworkCallback is unredacted (and only then
+        // if we hold ACCESS_FINE_LOCATION + location services are on).
+        var source = "callback"
+        val info = awaitWifiInfo(cm)
+            ?: @Suppress("DEPRECATION")
             context.getSystemService(WifiManager::class.java)?.connectionInfo
-        }
+                ?.also { source = "WifiManager" }
 
-        // <unknown ssid> is Android's placeholder when the SSID is withheld.
         val rawSsid = info?.ssid?.trim('"')
-        val ssidUsable = hasLocation && !rawSsid.isNullOrBlank() &&
-            rawSsid != WifiManager.UNKNOWN_SSID && rawSsid != "0x"
+        Log.d(
+            TAG,
+            "wifi: source=$source ssid=${info?.ssid} perm=$hasPermission locationOn=$locationOn " +
+                "security=${runCatching { info?.currentSecurityType }.getOrNull()} rssi=${info?.rssi}",
+        )
+        val redacted = rawSsid.isNullOrBlank() ||
+            rawSsid == WifiManager.UNKNOWN_SSID || rawSsid == "0x02" || rawSsid == "0x"
+        val ssidUsable = !redacted
+
+        val nameStatus = when {
+            ssidUsable -> WifiNameStatus.VISIBLE
+            !hasPermission -> WifiNameStatus.NO_PERMISSION
+            !locationOn -> WifiNameStatus.LOCATION_OFF
+            else -> WifiNameStatus.HIDDEN_OR_UNAVAILABLE
+        }
 
         // Linear dBm -> percent (the instance `calculateSignalLevel` is API 30+
         // and returns coarse buckets; the static overload is deprecated).
@@ -134,8 +164,53 @@ object NetworkFacts {
             channel = freq?.let { channelForFrequency(it) },
             frequencyMhz = freq,
             signalPercent = signalPercent,
-        )
+        ) to nameStatus
     }
+
+    /**
+     * Registers a transient default-network callback and returns the first
+     * `WifiInfo` it delivers, or `null` after ~2.5 s / if the active network
+     * isn't Wi-Fi.
+     *
+     * The SSID/BSSID in `NetworkCapabilities.transportInfo` are redacted on
+     * API 31+ **even for a NetworkCallback** unless the callback was constructed
+     * with `FLAG_INCLUDE_LOCATION_INFO` (and the app holds `ACCESS_FINE_LOCATION`
+     * + system Location is on). The no-flag callback and every synchronous
+     * `getNetworkCapabilities()` call give a redacted `WifiInfo`.
+     */
+    private suspend fun awaitWifiInfo(cm: ConnectivityManager): WifiInfo? =
+        withTimeoutOrNull(2500) {
+            suspendCancellableCoroutine { cont ->
+                lateinit var cb: ConnectivityManager.NetworkCallback
+                fun deliver(caps: NetworkCapabilities) {
+                    if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return
+                    val wifi = caps.transportInfo as? WifiInfo ?: return
+                    if (cont.isActive) {
+                        runCatching { cm.unregisterNetworkCallback(cb) }
+                        cont.resume(wifi)
+                    }
+                }
+                cb = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    object : ConnectivityManager.NetworkCallback(
+                        ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO,
+                    ) {
+                        override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) = deliver(c)
+                    }
+                } else {
+                    object : ConnectivityManager.NetworkCallback() {
+                        override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) = deliver(c)
+                    }
+                }
+                try {
+                    cm.registerDefaultNetworkCallback(cb)
+                } catch (e: SecurityException) {
+                    Log.d(TAG, "registerDefaultNetworkCallback denied: ${e.message}")
+                    if (cont.isActive) cont.resume(null)
+                    return@suspendCancellableCoroutine
+                }
+                cont.invokeOnCancellation { runCatching { cm.unregisterNetworkCallback(cb) } }
+            }
+        }
 
     /** `WifiInfo.getCurrentSecurityType()` is API 31+; older devices report `Unknown`. */
     private fun encryptionOf(info: WifiInfo?): String {
@@ -190,6 +265,25 @@ object NetworkFacts {
     }
 }
 
+/** Why the connected Wi-Fi network name is or isn't in the snapshot. */
+enum class WifiNameStatus {
+    /** SSID read successfully. */
+    VISIBLE,
+
+    /** On Wi-Fi, `ACCESS_FINE_LOCATION` not granted. */
+    NO_PERMISSION,
+
+    /** On Wi-Fi, permission held, but system Location is switched off. */
+    LOCATION_OFF,
+
+    /** On Wi-Fi, permission + Location both fine, still no SSID (genuinely
+     *  hidden, or the framework withheld it). */
+    HIDDEN_OR_UNAVAILABLE,
+
+    /** Not on Wi-Fi (cellular / ethernet / VPN / nothing). */
+    NOT_WIFI,
+}
+
 // --- HostSnapshot wire model (camelCase JSON — docs/specs/android-host-snapshot.md) ---
 
 @Serializable
@@ -234,7 +328,7 @@ data class SnapshotDns(
 /** Options object for `runAuditJson` — camelCase, mirrors `AndroidOptions` in the Rust crate. */
 @Serializable
 data class AndroidOptions(
-    val only: List<String> = listOf("topology", "security"),
+    val only: List<String> = listOf("topology", "security", "reliability", "speed"),
     @SerialName("speedDurationSecs") val speedDurationSecs: Long = 10,
     @SerialName("wifiDetail") val wifiDetail: Boolean = true,
 )
