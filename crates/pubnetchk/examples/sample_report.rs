@@ -9,7 +9,12 @@
 //! alert card, and two "what's fine" reassurances.
 //!
 //! Regenerate with:
-//!     cargo run --example sample_report > docs/examples/sample-report.html
+//!     cargo run -p pubnet-tools --example sample_report > docs/examples/sample-report.html
+//!
+//! Pass `--json` for the report as JSON (same schema as `pubnetchk --json`) —
+//! the committed fixture for the Android report-parser unit test
+//! (`android/app/src/test/resources/sample-report.json`):
+//!     cargo run -p pubnet-tools --example sample_report -- --json > android/app/src/test/resources/sample-report.json
 
 use pubnet_tools::output::html::render_html;
 use pubnet_tools::types::*;
@@ -149,5 +154,13 @@ fn sample_report() -> Report {
 }
 
 fn main() {
-    print!("{}", render_html(&sample_report()));
+    let report = sample_report();
+    if std::env::args().any(|a| a == "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).expect("report serializes")
+        );
+    } else {
+        print!("{}", render_html(&report));
+    }
 }
