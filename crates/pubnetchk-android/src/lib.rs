@@ -17,20 +17,23 @@ uniffi::setup_scaffolding!();
 #[derive(Debug, uniffi::Error)]
 pub enum AuditError {
     /// `snapshot_json` did not parse as a `HostSnapshot`.
-    BadSnapshot { message: String },
+    // The field is `reason`, not `message`: UniFFI 0.29's Kotlin backend also
+    // emits an `override val message` on the generated exception class, and a
+    // constructor property literally named `message` collides with it.
+    BadSnapshot { reason: String },
     /// `options_json` did not parse.
-    BadOptions { message: String },
+    BadOptions { reason: String },
     /// The tokio runtime could not be built, or the report could not be
     /// serialized. Not expected in practice.
-    Internal { message: String },
+    Internal { reason: String },
 }
 
 impl std::fmt::Display for AuditError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AuditError::BadSnapshot { message } => write!(f, "invalid host snapshot: {message}"),
-            AuditError::BadOptions { message } => write!(f, "invalid options: {message}"),
-            AuditError::Internal { message } => write!(f, "internal error: {message}"),
+            AuditError::BadSnapshot { reason } => write!(f, "invalid host snapshot: {reason}"),
+            AuditError::BadOptions { reason } => write!(f, "invalid options: {reason}"),
+            AuditError::Internal { reason } => write!(f, "internal error: {reason}"),
         }
     }
 }
@@ -83,14 +86,14 @@ fn check_name(s: &str) -> Option<CheckName> {
 #[uniffi::export]
 fn run_audit_json(snapshot_json: String, options_json: String) -> Result<String, AuditError> {
     let snapshot: HostSnapshot = serde_json::from_str(&snapshot_json)
-        .map_err(|e| AuditError::BadSnapshot { message: e.to_string() })?;
+        .map_err(|e| AuditError::BadSnapshot { reason: e.to_string() })?;
     let opts: AndroidOptions = serde_json::from_str(&options_json)
-        .map_err(|e| AuditError::BadOptions { message: e.to_string() })?;
+        .map_err(|e| AuditError::BadOptions { reason: e.to_string() })?;
 
     let only: Vec<CheckName> = opts.only.iter().filter_map(|s| check_name(s)).collect();
     if only.is_empty() {
         return Err(AuditError::BadOptions {
-            message: "`only` selected no known checks".to_string(),
+            reason: "`only` selected no known checks".to_string(),
         });
     }
 
@@ -106,10 +109,10 @@ fn run_audit_json(snapshot_json: String, options_json: String) -> Result<String,
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| AuditError::Internal { message: e.to_string() })?;
+        .map_err(|e| AuditError::Internal { reason: e.to_string() })?;
     let report = runtime.block_on(run_audit_with_probe(&probe, run_options));
 
-    serde_json::to_string(&report).map_err(|e| AuditError::Internal { message: e.to_string() })
+    serde_json::to_string(&report).map_err(|e| AuditError::Internal { reason: e.to_string() })
 }
 
 /// The engine version — matches the `version` field of the report JSON.

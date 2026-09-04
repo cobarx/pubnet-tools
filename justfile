@@ -50,3 +50,11 @@ android-bindings OUT="target/uniffi-kotlin":
 android-lib OUT="android/app/src/main/jniLibs":
     cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o {{OUT}} \
         build -p pubnetchk-android --release
+
+# Build the debug APK (cross-compiles the cdylib + generates bindings itself).
+android-apk:
+    cd android && ./gradlew :app:assembleDebug
+
+# Android JVM unit tests (the report-JSON parser).
+android-test:
+    cd android && ./gradlew :app:testDebugUnitTest

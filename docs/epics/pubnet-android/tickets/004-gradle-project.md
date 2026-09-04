@@ -5,7 +5,7 @@ ticket: 004
 slug: gradle-project
 type: feature
 points: 5
-status: todo
+status: in-review
 tracker_ref: tbd
 pr: none
 related: []
@@ -58,3 +58,32 @@ logic yet beyond a blank screen that calls `reportSchemaVersion()`.
 The `rust-android-gradle` plugin needs `ANDROID_NDK_HOME` (or `ndk.dir`). Pin
 the NDK version in `android/app/build.gradle.kts` so CI (ticket 8) and local
 builds agree. Do not commit `local.properties` or `jniLibs/*.so`.
+
+## Implementation notes (as landed)
+
+- Package/namespace `com.cobarx.pubnetchk`; `minSdk 26`, `compileSdk`/`targetSdk 35`.
+- Plugins: AGP 8.7.3, Kotlin 2.1.0 (+ `plugin.compose`, `plugin.serialization`),
+  `org.mozilla.rust-android-gradle` 0.9.6, Gradle 8.11.1 (wrapper committed).
+- `cargo { }` sets `targetDirectory = <repo>/target` — Cargo writes workspace
+  artifacts to the workspace root, not `<module>/target`, so the plugin's
+  artifact copy looked in the wrong place without it. `extraCargoBuildArguments
+  = ["--package", "pubnetchk-android"]` builds just that crate.
+- `generateUniffiBindings` is a plain `Exec` task (build the host debug cdylib,
+  then library-mode `uniffi-bindgen`), output on the Kotlin source path, wired
+  as a `preBuild` dep alongside `cargoBuild`.
+- `abiFilters` pins the APK to `arm64-v8a` / `armeabi-v7a` / `x86_64` — JNA
+  otherwise contributes x86/mips stubs and the app could load on an ABI with no
+  `libpubnetchk_android.so`.
+- Repo-root `.cargo/config.toml` adds `-Wl,-z,max-page-size=16384` for the three
+  `*-linux-android` triples — 16 KB ELF alignment, required by Android 15+ on
+  16 KB-page devices (NDK r27 needs the opt-in; r28 defaults it). Desktop
+  triples untouched.
+- `org.gradle.configuration-cache=false` — `rust-android-gradle` 0.9.6 reads
+  `Task.project` at execution time.
+- `AuditError`'s variant field was renamed `message` → `reason` in
+  `crates/pubnetchk-android` (ticket 3's crate): UniFFI 0.29's Kotlin backend
+  emits an `override val message` on the generated exception and a constructor
+  property named `message` collides with it. Blocked `compileDebugKotlin`.
+- The orphaned root `examples/sample_report.rs` (left unattached by the ticket-15
+  workspace restructure) moved to `crates/pubnetchk/examples/` and gained a
+  `--json` mode, used to generate the ticket-5 parser fixture.

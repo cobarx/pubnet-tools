@@ -1,3 +1,15 @@
 *.log
 .DS_Store
 target/
+
+# Android / Gradle build output
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+android/.kotlin/
+# Cross-compiled cdylibs land here via `just android-lib` / the rust-android-gradle plugin
+android/app/src/main/jniLibs/
+.idea/
+*.iml

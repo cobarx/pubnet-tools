@@ -82,7 +82,16 @@ pubnet-tools/
       src/main.rs
     pubnetchk-android/     UniFFI cdylib: run_audit_json(snapshot, options) -> Report JSON.
       src/lib.rs           Rust half of the Android app; built with --features tls-rustls.
-                           See docs/epics/pubnet-android/. (android/ Gradle project: not yet built)
+                           See docs/epics/pubnet-android/.
+  android/                 Gradle (Kotlin DSL) project — the Android app.
+    settings.gradle.kts    :app module; pins the plugin versions
+    app/build.gradle.kts   AGP + Compose + org.mozilla.rust-android-gradle. The `cargo`
+                           block cross-compiles crates/pubnetchk-android for arm64-v8a /
+                           armeabi-v7a / x86_64; `generateUniffiBindings` emits the Kotlin
+                           into build/generated/uniffi (wired as a preBuild dep)
+    app/src/main/kotlin/com/cobarx/pubnetchk/
+      MainActivity.kt      hosts the Compose screen (ticket 5 fills it in)
+    README.md              NDK version, cargo-ndk, Rust targets, how bindings are generated
 ```
 
 TLS backend is a feature of the `pubnet-tools` crate — `tls-native` (default,
@@ -147,6 +156,24 @@ Linux/macOS build. See
 [2026-08-28-windows-probes-via-win32-api.md](docs/decisions/2026-08-28-windows-probes-via-win32-api.md)
 (and the superseded [2026-08-27](docs/decisions/2026-08-27-windows-platform-support.md)
 for the toolchain rationale).
+
+**Android build.** The dev container (`.devcontainer/`, or
+[docs/context/devcontainer-setup.md](docs/context/devcontainer-setup.md)) ships the whole
+toolchain — JDK 21, the Android SDK/NDK, `cargo-ndk`, and the `*-linux-android` Rust
+targets. Outside it, install those by hand (see [android/README.md](android/README.md)).
+
+```bash
+just android-lib            # cross-compile the cdylib into android/app/src/main/jniLibs/
+just android-bindings       # regenerate the UniFFI Kotlin (target/uniffi-kotlin/)
+cd android && ./gradlew :app:assembleDebug        # -> app/build/outputs/apk/debug/app-debug.apk
+cd android && ./gradlew :app:testDebugUnitTest    # JVM unit tests (report-JSON parser)
+```
+
+The Gradle build cross-compiles the cdylib and regenerates the bindings itself (the
+`cargo` block + `generateUniffiBindings`, both `preBuild` deps) — the `just` recipes are
+for iterating on the Rust side without Gradle. Walking-skeleton scope (epic tickets 1–5):
+**topology + security only**. On-device / emulator runs are not covered by the dev
+container (no adb device, no KVM). See [docs/epics/pubnet-android/](docs/epics/pubnet-android/).
 
 ## Conventions
 
@@ -261,3 +288,4 @@ for the toolchain rationale).
 - [docs/epics/](docs/epics/) — epic + ticket breakdown for multi-PR features; source of truth for planned work
   - [wifi-auth-protocol/epic.md](docs/epics/wifi-auth-protocol/epic.md) — Wi-Fi auth protocol detection (WPA2-PSK vs WPA3-SAE vs transition mode); **abandoned** — superseded by pubnetdiag
   - [pubnetdiag/epic.md](docs/epics/pubnetdiag/epic.md) — Wi-Fi AP scanner binary (`pubnetdiag`); BSS scan + RSN IE parser + `--repair`; 4 tickets, 21 pts
+  - [pubnet-android/epic.md](docs/epics/pubnet-android/epic.md) — Android front-end (`crates/pubnetchk-android` + `android/`); UniFFI + JSON-snapshot bridge; walking skeleton = topology + security
