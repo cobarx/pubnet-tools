@@ -68,6 +68,8 @@ pubnet-tools/
         types.rs           pubnetchk-only types (CheckResult<T>, Finding, SecurityData, …) +
                            re-exports pubnet_platform::types for backwards-compat imports
         scoring.rs         pure function: &[ScorableResult] → { total, level, findings }
+        tls.rs             reqwest::ClientBuilder wired to the build's TLS backend —
+                           native-tls (desktop) / preconfigured webpki-roots rustls (Android)
         checks/
           topology.rs      default route → interface → addr/neigh; passive only; seeds gateway
           security.rs      WiFi info + DNS servers + DoH probes + captive portal (reqwest)
@@ -177,8 +179,12 @@ cd android && ./gradlew :app:testDebugUnitTest    # JVM unit tests (report-JSON 
 The Gradle build cross-compiles the cdylib and regenerates the bindings itself (the
 `cargo` block + `generateUniffiBindings`, both `preBuild` deps) — the `just` recipes are
 for iterating on the Rust side without Gradle. Walking-skeleton scope (epic tickets 1–5):
-**topology + security only**. On-device / emulator runs are not covered by the dev
-container (no adb device, no KVM). See [docs/epics/pubnet-android/](docs/epics/pubnet-android/).
+**topology + security only**. On the `tls-rustls` path `crate::tls` builds reqwest with a
+`webpki-roots` `ClientConfig` — reqwest's `rustls` feature hard-links
+`rustls-platform-verifier`, which `abort()`s the process on Android with no JVM
+`Context`; using the device trust store instead is epic ticket 9. On-device / emulator
+runs are not covered by the dev container (no adb device, no KVM). See
+[docs/epics/pubnet-android/](docs/epics/pubnet-android/).
 
 ## Conventions
 

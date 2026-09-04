@@ -84,6 +84,7 @@ missing tool, stop and hand it back to the owner.
 | 6 | Reliability on Android — unprivileged ICMP | feature | 5 | deferred | tbd | none |
 | 7 | Speed / NDT7 on Android — validate over rustls | feature | 3 | deferred | tbd | none |
 | 8 | CI: build `pubnetchk-android` + `assembleDebug` | chore | 2 | deferred | tbd | none |
+| 9 | DoH validation against the device trust store (platform verifier + JVM `Context`) | feature | 3 | deferred | tbd | none |
 
 Walking-skeleton points (1–5): `20`
 
@@ -98,8 +99,10 @@ Walking-skeleton points (1–5): `20`
   `cli.rs` (pure refactor, no CLI behavior change).
 - Ticket 4 needs 3 (there must be a crate to build a `.so` from).
 - Ticket 5 needs 4. This is the ticket that produces a running app.
-- Tickets 6–8 follow the skeleton in any order; 6 and 7 each open with a
-  decision doc before implementation.
+- Tickets 6–9 follow the skeleton in any order; 6, 7 and 9 each open with a
+  decision doc before implementation. Ticket 9 is an enhancement (DoH against the
+  device trust store instead of the bundled Mozilla roots), not a blocker — the
+  skeleton's DoH probe already works via `webpki-roots` (`crate::tls`).
 
 ## Decision docs
 
@@ -112,6 +115,12 @@ Walking-skeleton points (1–5): `20`
   `cargo tree` stays `native-tls`.
 - (ticket 6) `docs/decisions/<date>-android-unprivileged-icmp.md` — datagram
   ICMP socket vs `/system/bin/ping` vs TCP-connect latency.
+- (ticket 9) `docs/decisions/<date>-android-rustls-platform-verifier.md` — how
+  the rustls platform verifier gets its JVM `Context` (JNI init vs `ndk_context`
+  vs UniFFI-exported init), to validate DoH against the device trust store. The
+  skeleton uses `webpki-roots` via `use_preconfigured_tls` — the platform
+  verifier `abort()`s the process uninitialized, recorded in
+  `2026-08-30-android-tls-rustls.md`.
 
 ## Specs
 

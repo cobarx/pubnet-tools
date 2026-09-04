@@ -196,7 +196,7 @@ fn canaries() -> Vec<Canary> {
 /// Reqwest's redirect policy is set at Client construction, not per-request —
 /// a redirect must not be followed so the classifier can see it as a redirect.
 async fn probe_captive_portal() -> CaptivePortalResult {
-    let client = reqwest::Client::builder()
+    let client = crate::tls::client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .expect("building the no-redirect captive-portal client should never fail");

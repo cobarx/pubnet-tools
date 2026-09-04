@@ -31,7 +31,10 @@ pub struct NdtServer {
 }
 
 pub async fn default_locate() -> Result<NdtServer, String> {
-    let res = reqwest::get(LOCATE_URL).await.map_err(|e| e.to_string())?;
+    let client = crate::tls::client_builder()
+        .build()
+        .map_err(|e| e.to_string())?;
+    let res = client.get(LOCATE_URL).send().await.map_err(|e| e.to_string())?;
     if !res.status().is_success() {
         return Err(format!("NDT7 locate API returned HTTP {}", res.status()));
     }
