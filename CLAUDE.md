@@ -34,7 +34,8 @@ Non-root everywhere — nothing in `pubnetchk` requests elevated privileges.
 - **Android** (in progress — see `docs/epics/pubnet-android/`): a Kotlin/Compose app
   over the Rust engine via a UniFFI cdylib (`crates/pubnetchk-android`). Cannot shell
   out — Kotlin gathers a `HostSnapshot` from framework APIs and `SnapshotProbe` answers
-  from it. Walking skeleton: topology + security only.
+  from it. Skeleton (tickets 1–5) was topology + security; ticket 6 added
+  reliability (unprivileged datagram ICMP). Speed is ticket 7.
 
 ## Architecture
 
@@ -47,6 +48,8 @@ pubnet-tools/
     pubnet-platform/       shared OS-abstraction library (no binary)
       src/
         exec.rs            tokio process wrapper, array argv (no shell), never Errs on non-zero exit
+        net_icmp.rs        unprivileged datagram ICMP echo (SOCK_DGRAM/IPPROTO_ICMP), cfg(linux|android);
+                           the reliability check's ping on Android (an app can't run /system/bin/ping)
         network.rs         pure synchronous parsers + classification helpers for command output
         types.rs           platform-shared types: WifiEncryption, ArpNeighbor, DnsResolverInfo, etc.
         platform/
@@ -73,7 +76,8 @@ pubnet-tools/
         checks/
           topology.rs      default route → interface → addr/neigh; passive only; seeds gateway
           security.rs      WiFi info + DNS servers + DoH probes + captive portal (reqwest)
-          reliability.rs   ping ×10, join_all over targets, per-packet RTT parsing
+          reliability.rs   ping ×10, join_all over targets, per-packet RTT; system_ping is
+                           #[cfg]-split (ping binary / IcmpSendEcho2 / net_icmp on Android)
           speed.rs         NDT7 (M-Lab) client over tokio-tungstenite, hand-rolled protocol
         output/
           renderer.rs      console only, condensed Network/Security/Performance sections, never calls network
@@ -179,7 +183,7 @@ cd android && ./gradlew :app:testDebugUnitTest    # JVM unit tests (report-JSON 
 The Gradle build cross-compiles the cdylib and regenerates the bindings itself (the
 `cargo` block + `generateUniffiBindings`, both `preBuild` deps) — the `just` recipes are
 for iterating on the Rust side without Gradle. Walking-skeleton scope (epic tickets 1–5):
-**topology + security only**. On the `tls-rustls` path `crate::tls` builds reqwest with a
+**topology + security + reliability** (speed is ticket 7). On the `tls-rustls` path `crate::tls` builds reqwest with a
 `webpki-roots` `ClientConfig` — reqwest's `rustls` feature hard-links
 `rustls-platform-verifier`, which `abort()`s the process on Android with no JVM
 `Context`; using the device trust store instead is epic ticket 9. On-device / emulator
@@ -226,9 +230,12 @@ runs are not covered by the dev container (no adb device, no KVM). See
   probes. If both are blocked, the verdict is `uncertain` — never a false "no leak".
 - **Scanning all interfaces.** `ip addr` / `ifconfig` / `Get-NetIPAddress` show virtual
   and VMware interfaces. Always follow the default route's device.
-- **`ping -i` below 0.2 on Linux** (non-root floor is 200ms). `reliability.rs` shells
-  out to `ping` on Linux/macOS; on Windows it sends ICMP echoes via `IcmpSendEcho2`
-  (no `ping.exe`, no ~1s floor) — the seam is `system_ping`, `#[cfg]`-split.
+- **`ping -i` below 0.2 on Linux** (non-root floor is 200ms). The seam is
+  `system_ping`, `#[cfg]`-split three ways: Linux/macOS shell out to `ping`;
+  Windows sends ICMP echoes via `IcmpSendEcho2` (no `ping.exe`, no ~1s floor);
+  Android uses an unprivileged datagram ICMP socket (`pubnet_platform::net_icmp`)
+  because an app cannot shell out — see
+  [2026-09-02-android-unprivileged-icmp.md](docs/decisions/2026-09-02-android-unprivileged-icmp.md).
 - **Root.** Nothing requires or requests elevated privileges. `iw scan` is excluded for
   this reason, and so is macOS `wdutil info` (now sudo-only).
 - **`system_profiler SPAirPortDataType` on the default path.** It takes ~7s (it scans

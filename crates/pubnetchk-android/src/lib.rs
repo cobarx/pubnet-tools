@@ -41,7 +41,8 @@ impl std::fmt::Display for AuditError {
 impl std::error::Error for AuditError {}
 
 /// Options from the Kotlin side. All fields optional; the default runs the
-/// checks that work on Android today (topology + security).
+/// checks that work on Android today (topology + security + reliability; speed
+/// is opt-in — the caller adds `"speed"` to `only`).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct AndroidOptions {
@@ -58,7 +59,11 @@ struct AndroidOptions {
 impl Default for AndroidOptions {
     fn default() -> Self {
         Self {
-            only: vec!["topology".to_string(), "security".to_string()],
+            only: vec![
+                "topology".to_string(),
+                "security".to_string(),
+                "reliability".to_string(),
+            ],
             speed_duration_secs: 10,
             wifi_detail: true,
         }

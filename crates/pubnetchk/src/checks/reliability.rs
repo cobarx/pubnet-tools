@@ -14,17 +14,24 @@ const EXTERNAL_TARGETS: &[(&str, PingTargetLabel)] = &[
 
 const PING_COUNT: u32 = 10;
 
-/// The production ping. Windows sends ICMP echoes directly via `IcmpSendEcho2`
-/// — no `ping.exe` (whose output localizes) and no ~1s inter-echo floor, so
-/// the check takes ~2s there instead of ~10s. Every other platform shells out
-/// to `ping -c 10 -i 0.2`. See
-/// docs/decisions/2026-08-28-windows-probes-via-win32-api.md.
+/// The production ping, `#[cfg]`-split three ways:
+/// - **Windows** — ICMP echoes via `IcmpSendEcho2` (no `ping.exe`, whose output
+///   localizes; no ~1s inter-echo floor). See
+///   docs/decisions/2026-08-28-windows-probes-via-win32-api.md.
+/// - **Android** — an unprivileged datagram ICMP socket (`net_icmp`); an app
+///   cannot shell out to `/system/bin/ping`. See
+///   docs/decisions/2026-09-02-android-unprivileged-icmp.md.
+/// - **Linux / macOS** — `ping -c 10 -i 0.2`.
 pub async fn system_ping(host: String) -> PingSummary {
     #[cfg(windows)]
     {
         crate::platform::windows::icmp_ping(&host, PING_COUNT).await
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "android")]
+    {
+        pubnet_platform::net_icmp::icmp_ping(&host, PING_COUNT).await
+    }
+    #[cfg(all(not(windows), not(target_os = "android")))]
     {
         use crate::exec::{cmd, exec_cmd};
         let count = PING_COUNT.to_string();
