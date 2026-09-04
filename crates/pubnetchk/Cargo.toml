@@ -1,6 +1,6 @@
 [package]
 name = "pubnet-tools"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "Audit the public WiFi or network you just joined - security, speed, reliability, and passive topology."
 

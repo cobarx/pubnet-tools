@@ -2,6 +2,14 @@
 members = ["crates/pubnetchk", "crates/pubnet-platform", "crates/pubnetdiag", "crates/pubnetchk-android"]
 resolver = "2"
 
+# One version for the whole pubnet-tools suite — every crate does
+# `version.workspace = true`, the Android app reads this into `versionName`
+# (android/app/build.gradle.kts), and `report_schema_version()` /
+# `audit::VERSION` (= CARGO_PKG_VERSION) report it. Bump here only.
+# See docs/decisions/2026-09-04-single-suite-version.md.
+[workspace.package]
+version = "0.2.0"
+
 [profile.release]
 lto = true
 codegen-units = 1

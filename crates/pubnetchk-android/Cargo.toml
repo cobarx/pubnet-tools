@@ -1,6 +1,6 @@
 [package]
 name = "pubnetchk-android"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "UniFFI bindings for the pubnetchk audit engine — Android front-end."
 publish = false

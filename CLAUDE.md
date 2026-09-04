@@ -44,7 +44,10 @@ Cargo workspace with four crates:
 
 ```
 pubnet-tools/
-  Cargo.toml               workspace manifest + shared [profile.release]
+  Cargo.toml               workspace manifest + shared [profile.release] +
+                           [workspace.package] version — the one version for the whole
+                           suite (crates + Android app); bump here only. See
+                           docs/decisions/2026-09-04-single-suite-version.md
   crates/
     pubnet-platform/       shared OS-abstraction library (no binary)
       src/
@@ -300,6 +303,7 @@ runs are not covered by the dev container (no adb device, no KVM). See
   - [2026-08-26-macos-wifi-without-airport.md](docs/decisions/2026-08-26-macos-wifi-without-airport.md) — `airport` was removed in macOS 15/26; fast `ipconfig getsummary` (SSID+encryption) + opt-in slow `system_profiler` (channel+signal); SSID is Location-Services-gated
   - [2026-08-30-android-app-architecture.md](docs/decisions/2026-08-30-android-app-architecture.md) — Android app = Rust engine + UniFFI cdylib; JSON-snapshot bridge (no `uniffi` type derives, no callback probe); `audit::run_audit_with_probe` split out of `cli.rs`
   - [2026-08-30-android-tls-rustls.md](docs/decisions/2026-08-30-android-tls-rustls.md) — TLS backend is a crate feature (`tls-native` default vs `tls-rustls`); only the Android cdylib uses rustls; desktop `cargo tree` unchanged
+  - [2026-09-04-single-suite-version.md](docs/decisions/2026-09-04-single-suite-version.md) — one version for the whole suite in `[workspace.package]`; crates inherit it, the Android app derives `versionName`/`versionCode` from it
 - [docs/epics/](docs/epics/) — multi-ticket bodies of work: `<slug>/epic.md` + `tickets/NNN-*.md`
 - [docs/context/](docs/context/) — observed network behavior and domain background;
   read when debugging a check that misbehaves on a specific network

@@ -69,6 +69,17 @@ The generated Kotlin binds to the `.so` through JNA
 (`net.java.dev.jna:jna:…@aar`). `runAuditJson` **blocks** for the length of the
 audit — `AuditViewModel` calls it on `Dispatchers.IO`.
 
+## Versioning
+
+The whole suite shares one version — `[workspace.package] version` in the
+repo-root `Cargo.toml` (see
+[`docs/decisions/2026-09-04-single-suite-version.md`](../docs/decisions/2026-09-04-single-suite-version.md)).
+`app/build.gradle.kts` reads it: `versionName` = that semver (debug builds append
+`-debug+<8-char git sha>`), `versionCode` = `MAJOR*10000 + MINOR*100 + PATCH`.
+Shown in the app header and report footer (`BuildConfig.VERSION_NAME`).
+
+To release: bump the one line in the root `Cargo.toml`, commit, tag `vX.Y.Z`.
+
 ## 16 KB page size
 
 The repo-root `.cargo/config.toml` passes `-Wl,-z,max-page-size=16384` to the

@@ -1,6 +1,6 @@
 [package]
 name = "pubnetdiag"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "Wi-Fi diagnostic tool — scans visible APs and flags WPA2+WPA3 transition-mode issues."
 
