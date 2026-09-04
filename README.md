@@ -222,7 +222,9 @@ platform probe.
 
 ## License
 
-MIT, including every dependency — see
+MIT.
+
+The speed test runs on [M-Lab's open NDT7 protocol](https://www.measurementlab.net/tests/ndt/)
+rather than a proprietary service like Ookla or fast.com — see
 [docs/decisions/2026-08-02-open-source-only.md](docs/decisions/2026-08-02-open-source-only.md)
-for why, and `Cargo.toml` for the current dependency list rather than a copy here
-that can go stale.
+for why.
