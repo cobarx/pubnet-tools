@@ -8,7 +8,7 @@ resolver = "2"
 # `audit::VERSION` (= CARGO_PKG_VERSION) report it. Bump here only.
 # See docs/decisions/2026-09-04-single-suite-version.md.
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 
 [profile.release]
 lto = true
