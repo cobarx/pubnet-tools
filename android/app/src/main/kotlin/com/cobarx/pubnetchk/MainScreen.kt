@@ -56,6 +56,11 @@ fun MainScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Text(
+                "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             Button(
                 onClick = onScan,
@@ -204,7 +209,7 @@ private fun ReportView(
     }
 
     Text(
-        "engine ${report.version} · ${report.timestamp}",
+        "app ${BuildConfig.VERSION_NAME} · engine ${report.version} · ${report.timestamp}",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

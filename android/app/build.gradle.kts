@@ -10,6 +10,30 @@ plugins {
 val repoRoot: File = rootProject.projectDir.parentFile
 val androidCrateDir: File = repoRoot.resolve("crates/pubnetchk-android")
 
+// --- Version -----------------------------------------------------------------
+// One source of truth for the whole suite: `[workspace.package] version` in the
+// repo-root Cargo.toml (see docs/decisions/2026-09-04-single-suite-version.md).
+// versionName = that semver; versionCode = MAJOR*10000 + MINOR*100 + PATCH.
+val suiteVersion: String = run {
+    val toml = repoRoot.resolve("Cargo.toml").readText()
+    val section = toml.substringAfter("[workspace.package]", "")
+    Regex("""version\s*=\s*"([^"]+)"""").find(section)?.groupValues?.get(1)
+        ?: error("no [workspace.package] version in ${repoRoot.resolve("Cargo.toml")}")
+}
+val appVersionName: String = suiteVersion
+val appVersionCode: Int = run {
+    val (maj, min, pat) = suiteVersion.split('.', limit = 3).map { it.takeWhile(Char::isDigit).toInt() }
+    maj * 10_000 + min * 100 + pat
+}
+
+// Short commit for debug builds, so a side-loaded APK is identifiable. Empty
+// outside a git checkout (release tarball, some CI).
+val gitShortSha: String = runCatching {
+    providers.exec {
+        commandLine("git", "-C", repoRoot.path, "rev-parse", "--short=8", "HEAD")
+    }.standardOutput.asText.get().trim()
+}.getOrDefault("")
+
 // Pinned so local builds and the dev container (docs/context/devcontainer-setup.md)
 // and CI (epic ticket 8) all resolve the same toolchain.
 val pinnedNdkVersion = "27.2.12479018"
@@ -23,8 +47,8 @@ android {
         applicationId = "com.cobarx.pubnetchk"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -37,6 +61,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // e.g. "0.2.0-debug+a1b2c3d4" — shows in the app and `adb dumpsys`.
+            versionNameSuffix = "-debug" + if (gitShortSha.isNotEmpty()) "+$gitShortSha" else ""
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -57,6 +85,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true // for BuildConfig.VERSION_NAME / VERSION_CODE in the UI
     }
 
     // The UniFFI-generated bindings land here; see `generateUniffiBindings` below.
