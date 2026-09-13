@@ -83,7 +83,7 @@ missing tool, stop and hand it back to the owner.
 | 5 | `NetworkFacts` collector + Compose skeleton screen | feature | 5 | in-review | tbd | tbd |
 | 6 | Reliability on Android — unprivileged ICMP | feature | 5 | in-review | tbd | tbd |
 | 7 | Speed / NDT7 on Android — validate over rustls | feature | 3 | in-review | tbd | tbd |
-| 8 | CI: build `pubnetchk-android` + `assembleDebug` | chore | 2 | deferred | tbd | none |
+| 8 | CI: build `pubnetchk-android` + `assembleDebug` | chore | 2 | in-review | tbd | tbd |
 | 9 | DoH validation against the device trust store (platform verifier + JVM `Context`) | feature | 3 | deferred | tbd | none |
 | 10 | Cellular / mobile-network facts in the snapshot + UI | feature | 3 | deferred | tbd | none |
 
@@ -125,6 +125,10 @@ Walking-skeleton points (1–5): `20`
 - `docs/decisions/2026-09-02-android-ndt7-rustls.md` (ticket 7) — `connect_async`
   auto-selects rustls + webpki-roots for the NDT7 WebSocket when `native-tls` is
   absent; no explicit `Connector` needed.
+- `docs/decisions/2026-09-13-release-automation-github-actions.md` (ticket 8) —
+  hand-rolled GitHub Actions matrix over `cargo-dist`; the Android job builds
+  `assembleDebug` and rides in the same release workflow as the desktop
+  targets.
 - (ticket 9) `docs/decisions/<date>-android-rustls-platform-verifier.md` — how
   the rustls platform verifier gets its JVM `Context` (JNI init vs `ndk_context`
   vs UniFFI-exported init), to validate DoH against the device trust store. The

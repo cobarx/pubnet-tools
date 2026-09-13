@@ -1,0 +1,183 @@
+name: Release
+
+# Tag-triggered builds of pubnetchk + pubnetdiag for Linux/macOS/Windows and the
+# Android debug APK, published as a single GitHub Release. workflow_dispatch
+# lets you dry-run the whole matrix (build + package, no publish) without
+# pushing a tag. See docs/decisions/2026-09-13-release-automation-github-actions.md.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-desktop:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # native-tls links system OpenSSL on Linux (see CLAUDE.md — no vendored
+      # OpenSSL). macOS/Windows use the OS-provided TLS via native-tls, no
+      # extra package needed.
+      - name: Install Linux TLS headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      # The project targets Windows via the GNU toolchain, not MSVC — see
+      # CLAUDE.md "Windows toolchain" and
+      # docs/decisions/2026-08-28-windows-probes-via-win32-api.md. windows-latest
+      # ships mingw-w64 already; installing it again here is a fast no-op if so
+      # and a real install if the image ever drops it.
+      - name: Install Windows GNU toolchain
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu
+          rustup target add x86_64-pc-windows-gnu --toolchain stable-x86_64-pc-windows-gnu
+          choco install mingw --no-progress -y
+
+      - name: Add Rust target
+        if: matrix.target != 'x86_64-pc-windows-gnu'
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build (desktop)
+        if: matrix.target != 'x86_64-pc-windows-gnu'
+        run: cargo build --release --target ${{ matrix.target }} -p pubnet-tools -p pubnetdiag
+
+      - name: Build (windows-gnu)
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: cargo +stable-x86_64-pc-windows-gnu build --release --target x86_64-pc-windows-gnu -p pubnet-tools -p pubnetdiag
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="pubnet-tools-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          dir="dist/$name"
+          mkdir -p "$dir"
+          cp "target/${{ matrix.target }}/release/pubnetchk" "target/${{ matrix.target }}/release/pubnetdiag" "$dir/"
+          cp README.md LICENSE "$dir/"
+          tar -czf "dist/$name.tar.gz" -C dist "$name"
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="pubnet-tools-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          dir="dist/$name"
+          mkdir -p "$dir"
+          cp "target/x86_64-pc-windows-gnu/release/pubnetchk.exe" "target/x86_64-pc-windows-gnu/release/pubnetdiag.exe" "$dir/"
+          chmod +x "$dir"/*.exe
+          cp README.md LICENSE "$dir/"
+          (cd dist && 7z a "$name.zip" "$name" >/dev/null)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  build-android:
+    name: build (android debug apk)
+    runs-on: ubuntu-latest
+    # NDK version pinned to match android/app/build.gradle.kts
+    # (pinnedNdkVersion) — see docs/context/devcontainer-setup.md.
+    env:
+      NDK_VERSION: "27.2.12479018"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+          workspaces: ". -> target"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install SDK components
+        run: |
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "ndk;${NDK_VERSION}"
+
+      - name: Export ANDROID_NDK_HOME
+        run: echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Add Android Rust targets
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Stage APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+            "dist/pubnetchk-android-${GITHUB_REF_NAME}-debug.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-android
+          path: dist/*.apk
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: [build-desktop, build-android]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Checksums
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          find . -maxdepth 2 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.apk' \) \
+            -exec sha256sum {} \; > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+            artifacts/**/*.apk
+            artifacts/SHA256SUMS
+          generate_release_notes: true
