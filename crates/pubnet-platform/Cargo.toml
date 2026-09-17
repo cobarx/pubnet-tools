@@ -12,6 +12,13 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "t
 [dev-dependencies]
 serde_json = "1.0.151"
 
+# macos.rs's `parse_system_profiler_wifi` parses `system_profiler -json` output
+# with serde_json in production code (not just tests) — needs to be a real
+# dependency on macOS, not just a dev-dependency. Kept as dev-dependencies too
+# above for cross-platform unit tests (e.g. snapshot.rs's fixture parsing).
+[target.'cfg(target_os = "macos")'.dependencies]
+serde_json = "1.0.151"
+
 # Unprivileged datagram ICMP for the reliability check on Android (and Linux) —
 # see src/net_icmp.rs and docs/decisions/2026-09-02-android-unprivileged-icmp.md.
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
