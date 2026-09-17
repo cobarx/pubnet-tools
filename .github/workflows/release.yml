@@ -122,10 +122,14 @@ jobs:
           java-version: "21"
 
       # ubuntu-latest ships a preinstalled Android SDK (ANDROID_HOME/
-      # ANDROID_SDK_ROOT already set, cmdline-tools on PATH) — no setup action
-      # needed. android-actions/setup-android@v3 was tried first and fails: it
-      # tries to install the legacy `tools` package, which Google removed from
-      # the SDK repository.
+      # ANDROID_SDK_ROOT already set) — no setup action needed.
+      # android-actions/setup-android@v3 was tried first and fails: it tries
+      # to install the legacy `tools` package, which Google removed from the
+      # SDK repository. The preinstalled SDK's cmdline-tools aren't on PATH
+      # though, so locate sdkmanager and add its directory.
+      - name: Add sdkmanager to PATH
+        run: dirname "$(find "$ANDROID_HOME" -maxdepth 4 -iname sdkmanager -type f | sort -V | tail -1)" >> "$GITHUB_PATH"
+
       - name: Install SDK components
         run: |
           sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "ndk;${NDK_VERSION}"
