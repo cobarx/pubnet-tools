@@ -198,6 +198,12 @@ On the `tls-rustls` path `crate::tls` builds reqwest with a
 runs are not covered by the dev container (no adb device, no KVM). See
 [docs/epics/pubnet-android/](docs/epics/pubnet-android/).
 
+**Releases.** Pushing a `v*.*.*` tag runs `.github/workflows/release.yml`:
+Linux/macOS/Windows binaries for `pubnetchk` + `pubnetdiag` and a debug
+Android APK, all attached to a GitHub Release. `workflow_dispatch` runs the
+same build+package matrix without publishing, for a dry run. See
+[2026-09-13-release-automation-github-actions.md](docs/decisions/2026-09-13-release-automation-github-actions.md).
+
 ## Conventions
 
 - **Spec-driven, test-driven.** Load-bearing/conditional behavior is specified in
@@ -304,6 +310,7 @@ runs are not covered by the dev container (no adb device, no KVM). See
   - [2026-08-30-android-app-architecture.md](docs/decisions/2026-08-30-android-app-architecture.md) — Android app = Rust engine + UniFFI cdylib; JSON-snapshot bridge (no `uniffi` type derives, no callback probe); `audit::run_audit_with_probe` split out of `cli.rs`
   - [2026-08-30-android-tls-rustls.md](docs/decisions/2026-08-30-android-tls-rustls.md) — TLS backend is a crate feature (`tls-native` default vs `tls-rustls`); only the Android cdylib uses rustls; desktop `cargo tree` unchanged
   - [2026-09-04-single-suite-version.md](docs/decisions/2026-09-04-single-suite-version.md) — one version for the whole suite in `[workspace.package]`; crates inherit it, the Android app derives `versionName`/`versionCode` from it
+  - [2026-09-13-release-automation-github-actions.md](docs/decisions/2026-09-13-release-automation-github-actions.md) — `.github/workflows/release.yml`: hand-rolled build matrix over `cargo-dist`, why Windows builds GNU not MSVC, why Android ships `assembleDebug`
 - [docs/epics/](docs/epics/) — multi-ticket bodies of work: `<slug>/epic.md` + `tickets/NNN-*.md`
 - [docs/context/](docs/context/) — observed network behavior and domain background;
   read when debugging a check that misbehaves on a specific network

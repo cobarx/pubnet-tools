@@ -48,15 +48,19 @@ approach.
 
 ## Installing
 
-You need a Rust toolchain (edition 2024) — [`rustup`](https://rustup.rs) is the
-easiest way to get one:
+Prebuilt binaries for Linux, macOS (Intel + Apple Silicon), and Windows are
+attached to each [GitHub Release](https://github.com/cobarx/pubnet-tools/releases) —
+download the archive for your platform, extract it, and put `pubnetchk` on your
+`PATH`. A debug Android APK is attached too (see
+[docs/epics/pubnet-android/](docs/epics/pubnet-android/) — the app is a
+walking skeleton, not a Play Store release).
+
+To build from source instead, you need a Rust toolchain (edition 2024) —
+[`rustup`](https://rustup.rs) is the easiest way to get one:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
-
-pubnetchk isn't packaged anywhere yet, so build it from source and install it onto
-your `PATH`:
 
 ```bash
 git clone https://github.com/cobarx/pubnet-tools
