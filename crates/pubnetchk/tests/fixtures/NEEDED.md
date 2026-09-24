@@ -5,7 +5,6 @@ Cases not yet covered by any real capture. Each entry names what to capture and 
 | Context slug | Commands | How to get it |
 |---|---|---|
 | `airport-captive-macos` | all macOS commands | Run capture.sh at an airport or hotel before logging in |
-| `airport-captive-linux` | all Linux commands | Same, on a Linux machine |
 | `home-ethernet-macos` | all macOS commands | Plug in USB-C Ethernet, disconnect WiFi, run capture.sh |
 | `vpn-tailscale-macos` | all macOS commands | Connect Tailscale, run capture.sh |
 | `ssid-visible-macos` | `ipconfig_getsummary_<iface>`, `system_profiler_-json_SPAirPortDataType` | Grant the terminal app Location Services access (System Settings ▸ Privacy & Security ▸ Location Services), then run capture.sh. Every current macOS capture has `SSID`/`_name` = `<redacted>`; we have no capture of the real-SSID branch. |

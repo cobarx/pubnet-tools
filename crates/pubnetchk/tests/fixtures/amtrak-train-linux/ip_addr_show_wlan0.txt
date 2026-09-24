@@ -1,0 +1,6 @@
+2: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+    inet 10.6.0.246/21 brd 10.6.7.255 scope global dynamic noprefixroute wlan0
+       valid_lft 558sec preferred_lft 558sec
+    inet6 fe80::9a29:11bd:f41a:dd07/64 scope link noprefixroute 
+       valid_lft forever preferred_lft forever

@@ -1,0 +1,6 @@
+context      = "amtrak-bus-linux"
+captured_at  = "2026-09-24T22:53:12Z"
+os           = "Linux 7.2.2-1-cachyos"
+interface    = "wlan0"
+notes        = "Amtrak Bus network"
+scrubbed     = "17 SSID(s) -> STAND-IN placeholders, 1 own MAC(s), 1 other MAC(s)/BSSID(s); kept SSID(s): Amtrak Thruway"

@@ -1,0 +1,2 @@
+10.6.0.1 lladdr 00:21:21:00:00:01 REACHABLE 
+10.6.0.2 lladdr 00:c0:3a:00:00:01 REACHABLE 
