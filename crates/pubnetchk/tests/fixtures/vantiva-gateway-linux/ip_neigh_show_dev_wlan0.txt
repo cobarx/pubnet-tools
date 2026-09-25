@@ -1,0 +1,4 @@
+10.0.0.77 lladdr 38:18:4c:00:00:01 REACHABLE 
+10.0.0.1 lladdr 60:3d:26:00:00:02 REACHABLE 
+10.0.0.116 lladdr a8:b5:7c:00:00:03 STALE 
+fe80::623d:26ff:fe00:2 lladdr 60:3d:26:00:00:02 router REACHABLE 

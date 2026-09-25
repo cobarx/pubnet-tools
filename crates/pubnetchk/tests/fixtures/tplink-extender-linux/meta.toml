@@ -1,0 +1,6 @@
+context      = "tplink-extender-linux"
+captured_at  = "2026-09-25T04:38:27Z"
+os           = "Linux 7.2.2-1-cachyos"
+interface    = "wlan0"
+notes        = "Residential Wi-Fi: likely TP-Link (BSSID OUI) extender bridged into the main gateway's 10.0.0.0/24; advertises WPA1 WPA2, CCMP only (iw scan dump); no captive portal"
+scrubbed     = "9 SSID(s) -> STAND-IN placeholders, 1 own MAC(s), 3 other MAC(s)/BSSID(s); IPv6 re-scrub: 1 IPv6 prefix(es)"
