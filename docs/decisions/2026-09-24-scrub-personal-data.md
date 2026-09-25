@@ -44,6 +44,8 @@ Two kinds:
 | Other devices' MACs (the gateway too), BSSIDs | Vendor OUI kept, rest `00:00:NN` |
 | Hostname | `standin-host` |
 | Home / residential public IPs | Documentation ranges (`192.0.2.0/24`, `203.0.113.0/24`) |
+| A site's IPv6 prefix (global or ULA) | Documentation prefix, `2001:db8:ffff:ffNN::/64` per original /64 |
+| EUI-64 IPv6 interface IDs (a MAC in disguise) | Rebuilt from that MAC's stand-in |
 
 Not personal, kept as-is: a public operator's SSID (`YourTrainWiFi`), operator and
 public-service IPs, RFC 1918 addresses, the author's own name on authorship metadata.
@@ -56,7 +58,9 @@ For fixtures this is mechanical: `capture.sh` stages the capture, runs
 unless the scrub verifies. Values to replace are derived from the capture itself (the
 interface's own `ether` line, the ARP table), not typed in. Verification is
 default-deny: any MAC left that is not a stand-in or broadcast/multicast fails the
-capture, so a new command's output fails loudly instead of leaking.
+capture, so a new command's output fails loudly instead of leaking. The same holds for
+IPv6: an address in the site's /48 or an EUI-64 address whose MAC is not a stand-in
+fails it.
 
 ## Rationale
 
@@ -107,3 +111,6 @@ Solo call; requested by the project owner.
   gateway presence, and multicast filtering, none of which changed.
 - `network-behavior.md` and `crates/pubnetdiag/tests/repair_flow.rs` comments had a
   friend's name replaced with "a friend's" and a phone BSSID scrubbed under this policy.
+- Amended 2026-09-24: IPv6 added after a residential capture kept the house's global
+  prefix and the router's EUI-64 link-local address (its MAC). `home-wifi-macos` was
+  re-scrubbed for its ULA prefix; no test reads that address.
