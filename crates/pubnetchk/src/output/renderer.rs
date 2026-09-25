@@ -187,6 +187,15 @@ fn render_security_section(report: &Report) -> Vec<String> {
             "none".to_string()
         };
         lines.push(format!("  Captive portal: {portal}"));
+        // spec: captive-portal-detection#S4-S6
+        if let Some(url) = sec
+            .captive_portal
+            .redirect_location
+            .as_deref()
+            .filter(|url| sec.captive_portal.detected && !url.is_empty())
+        {
+            lines.push(format!("    Sign in at: {url}"));
+        }
     } else {
         lines.push(format!("  Security: {}", report.security.status.as_str()));
     }
@@ -612,6 +621,68 @@ mod tests {
         ];
         let output = render_report(&report, false);
         assert!(!output.contains("DNS leak detected"));
+    }
+
+    fn security_section(output: &str) -> Vec<String> {
+        let lines: Vec<&str> = output.lines().collect();
+        let start = lines.iter().position(|l| *l == "Security:").unwrap();
+        let end = lines.iter().position(|l| *l == "Performance:").unwrap();
+        lines[start..end].iter().map(|l| l.to_string()).collect()
+    }
+
+    fn with_portal(method: CaptivePortalMethod, location: Option<&str>) -> Report {
+        let mut report = base_report();
+        let portal = &mut report.security.data.as_mut().unwrap().captive_portal;
+        portal.detected = true;
+        portal.method = method;
+        portal.redirect_location = location.map(str::to_string);
+        report
+    }
+
+    // spec: captive-portal-detection#S4
+    #[test]
+    fn detected_redirect_shows_where_to_sign_in() {
+        let report = with_portal(
+            CaptivePortalMethod::Redirect,
+            Some("http://portal.example/login?orig=canary"),
+        );
+        let section = security_section(&render_report(&report, false));
+        assert!(
+            section
+                .iter()
+                .any(|l| l.contains("Captive portal: detected (redirect)"))
+        );
+        assert!(
+            section
+                .iter()
+                .any(|l| l.contains("Sign in at: http://portal.example/login?orig=canary"))
+        );
+    }
+
+    // spec: captive-portal-detection#S5
+    #[test]
+    fn no_sign_in_address_when_nothing_is_intercepting() {
+        let section = security_section(&render_report(&base_report(), false));
+        assert!(section.iter().any(|l| l.contains("Captive portal: none")));
+        assert!(!section.iter().any(|l| l.contains("Sign in at")));
+    }
+
+    // spec: captive-portal-detection#S6
+    #[test]
+    fn no_sign_in_address_when_the_portal_gave_none() {
+        for report in [
+            with_portal(CaptivePortalMethod::ContentMismatch, None),
+            with_portal(CaptivePortalMethod::Redirect, None),
+            with_portal(CaptivePortalMethod::Redirect, Some("")),
+        ] {
+            let section = security_section(&render_report(&report, false));
+            assert!(
+                section
+                    .iter()
+                    .any(|l| l.contains("Captive portal: detected"))
+            );
+            assert!(!section.iter().any(|l| l.contains("Sign in at")));
+        }
     }
 
     #[test]
