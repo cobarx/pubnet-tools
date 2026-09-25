@@ -31,14 +31,15 @@ Two kinds:
 
 - **Default placeholders** for data that carries no meaning of its own, such as the
   neighbouring SSIDs in a scan: `STAND-IN SSID NN`, written by the scrub. They stay.
-- **Joke names, themed to the context, written by the dev** (not the tooling or the
-  agent) where the hidden thing is meaningful to the reader: a person in a doc, or a
-  network that is the subject of the capture.
+- **A name the dev chooses** (not the tooling or the agent) where the hidden thing is
+  meaningful to the reader: a person in a doc, or a network that is the subject of the
+  capture. Whatever interests the dev: humorous, personal, or commentary (on a hot day
+  in Sacramento, a replaced network might become "Sac Is Hot").
 
 | Personal data | Stand-in |
 |---|---|
-| People's names | A plain description ("a friend's apartment"); the dev's joke name if the person matters to the reader |
-| SSIDs (every one, unless an operator's public name) | `STAND-IN SSID NN`; the dev's joke name if the SSID is meaningful |
+| People's names | A plain description ("a friend's apartment"); a name the dev chooses if the person matters to the reader |
+| SSIDs (every one, unless an operator's public name) | `STAND-IN SSID NN`; a name the dev chooses if the SSID is meaningful |
 | This machine's MACs | `02:00:00:00:00:NN` (locally administered, clearly fake) |
 | Other devices' MACs (the gateway too), BSSIDs | Vendor OUI kept, rest `00:00:NN` |
 | Hostname | `standin-host` |
@@ -67,8 +68,8 @@ capture, so a new command's output fails loudly instead of leaking.
   `<redacted>` for SSIDs without a Location Services grant, and the parsers treat it
   as "SSID unknown". Using the same token for our scrub would make fixtures lie about
   what the OS did. Hashes and realistic fakes read as real data; `STAND-IN SSID 03`
-  cannot be mistaken for a real network. Where a name is worth giving, the dev gives it
-  (and the owner asked for those to be fun).
+  cannot be mistaken for a real network. Where a name is worth giving, the dev gives
+  it, and it should read as theirs rather than as data.
 - **Why keep OUIs.** Vendor identity is the useful part for analysis (Extreme Networks
   APs, a duagon rail box); the low three octets are the part that identifies a device
   or, for BSSIDs, locates it via public war-driving databases.
@@ -82,9 +83,9 @@ Solo call; requested by the project owner.
 
 ## Considerations / Revisit if
 
-- **Joke names are the dev's to write, and only where they mean something.** A first
-  draft shipped agent-written theme lists in `scrub.sh`; the owner called that out as
-  taking the fun out of it, and noted that neighbouring SSIDs don't matter enough to
+- **Chosen names are the dev's to write, and only where they mean something.** A
+  first draft shipped agent-written joke lists in `scrub.sh`; the owner called that out
+  as taking the fun out of it, and noted that neighbouring SSIDs don't matter enough to
   name. The scrub writes plain placeholders (the general principle is
   cobarx/build-skills-cobarx#45).
 - **Git history still holds the old values.** Today: scrubbing is forward-only; the
