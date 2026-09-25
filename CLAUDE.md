@@ -228,7 +228,8 @@ same build+package matrix without publishing, for a dry run. See
   `crates/pubnetchk/tests/fixtures/capture.sh <context>` captures a new environment (Linux/macOS);
   output is committed. `crates/pubnetchk/tests/fixtures/NEEDED.md` tracks gaps. Notes on
   a captured network go in a `README.md` beside its capture, written as a dated snapshot
-  (one vehicle or venue, one day), not as the network's policy. Windows has no fixtures —
+  (one vehicle or venue, one day), not as the network's policy. Capturing a real network (what to record, how to probe it politely,
+  where notes go) follows the project skill `.claude/skills/network-capture/`. Windows has no fixtures —
   its probes call the Win32 API and parse no command output, so its coverage is the
   contract tests plus pure mapping unit tests.
 - **Personal data is scrubbed, with obviously fake stand-ins.** Nothing committed or posted
