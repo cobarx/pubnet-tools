@@ -61,6 +61,35 @@ different portal vendors; retrying once a portal is presumed passed.
 - **And** captive portal detected is true
 - **And** the detection method is `content-mismatch`
 
+### S4: The console says where to sign in
+
+**Happy path.** Added 2026-09-24 (#59): on a bus whose desktop never offered to sign
+in, the address was already in the JSON report but not on screen.
+
+- **Given** a captive portal detected by redirect, with the redirect's destination
+  recorded (S2)
+- **When** conncheck prints its console summary
+- **Then** the security section shows that destination as where to sign in
+
+### S5: No sign-in address when nothing is intercepting
+
+**Edge.**
+
+- **Given** no captive portal is intercepting traffic: none present, or the person has
+  already signed in, so the canary gets its expected response (S1)
+- **When** conncheck prints its console summary
+- **Then** no sign-in address is shown
+
+### S6: No sign-in address when the portal gave none
+
+**Edge.**
+
+- **Given** a captive portal detected without a recorded destination: by content
+  substitution (S3), or by a redirect that carried no destination
+- **When** conncheck prints its console summary
+- **Then** captive portal is reported as detected
+- **And** no sign-in address is shown, rather than an empty or made-up one
+
 ## Open questions
 
 None outstanding.
@@ -72,6 +101,9 @@ None outstanding.
       the redirect destination
 - [ ] `S3` holds: a same-status content substitution yields `detected: true`,
       `method: 'content-mismatch'`
+- [ ] `S4` holds: a redirect with a recorded destination puts that destination on the
+      console as where to sign in
+- [ ] `S5` and `S6` hold: no sign-in address is shown without a recorded destination
 - [ ] A canary request that fails outright (no response at all) does not get reported
       as `detected: true` — that's a connectivity failure, not portal interception
 
