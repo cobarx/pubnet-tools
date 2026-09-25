@@ -1,0 +1,6 @@
+context      = "vantiva-gateway-linux"
+captured_at  = "2026-09-25T04:55:15Z"
+os           = "Linux 7.2.2-1-cachyos"
+interface    = "wlan0"
+notes        = "Residential Wi-Fi: likely Vantiva/Technicolor ISP gateway (BSSID OUI; WPS reports Quantenna radio, model 'pearl'); WPA2-PSK, CCMP only (iw scan dump); no captive portal"
+scrubbed     = "7 SSID(s) -> STAND-IN placeholders, 1 own MAC(s), 3 other MAC(s)/BSSID(s); IPv6 re-scrub: 1 IPv6 prefix(es)"
