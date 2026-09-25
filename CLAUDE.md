@@ -229,6 +229,14 @@ same build+package matrix without publishing, for a dry run. See
   output is committed. `crates/pubnetchk/tests/fixtures/NEEDED.md` tracks gaps. Windows has no fixtures —
   its probes call the Win32 API and parse no command output, so its coverage is the
   contract tests plus pure mapping unit tests.
+- **Personal data is scrubbed, with obviously fake stand-ins.** Nothing committed or posted
+  (fixtures, docs, issues, PR text, test comments) carries people's names, SSIDs,
+  device MACs, BSSIDs, or home IPs. Stand-ins are obviously fake, never `<redacted>`
+  (macOS emits that itself): plain placeholders by default, and a name the dev chooses
+  (humorous, personal, commentary: whatever interests them) only where the hidden thing
+  is meaningful (a person, the network under study). `capture.sh` scrubs fixtures via `scrub.sh`, which fails the capture rather
+  than let an unrecognised MAC through; `--keep-ssid` spares an operator's public SSID. See
+  [2026-09-24-scrub-personal-data.md](docs/decisions/2026-09-24-scrub-personal-data.md).
 - **Feature requests and known gaps are GitHub issues** (`gh issue`), not TODO comments
   or notes buried in decision docs.
 - **Checks never throw.** All failure surfaces as `CheckResult` state.
@@ -311,6 +319,7 @@ same build+package matrix without publishing, for a dry run. See
   - [2026-08-30-android-tls-rustls.md](docs/decisions/2026-08-30-android-tls-rustls.md) — TLS backend is a crate feature (`tls-native` default vs `tls-rustls`); only the Android cdylib uses rustls; desktop `cargo tree` unchanged
   - [2026-09-04-single-suite-version.md](docs/decisions/2026-09-04-single-suite-version.md) — one version for the whole suite in `[workspace.package]`; crates inherit it, the Android app derives `versionName`/`versionCode` from it
   - [2026-09-13-release-automation-github-actions.md](docs/decisions/2026-09-13-release-automation-github-actions.md) — `.github/workflows/release.yml`: hand-rolled build matrix over `cargo-dist`, why Windows builds GNU not MSVC, why Android ships `assembleDebug`
+  - [2026-09-24-scrub-personal-data.md](docs/decisions/2026-09-24-scrub-personal-data.md): personal data scrubbed from everything committed or posted, with obviously fake stand-ins; `scrub.sh` does it at capture time with default-deny verification
 - [docs/epics/](docs/epics/) — multi-ticket bodies of work: `<slug>/epic.md` + `tickets/NNN-*.md`
 - [docs/context/](docs/context/) — observed network behavior and domain background;
   read when debugging a check that misbehaves on a specific network

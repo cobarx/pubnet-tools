@@ -55,11 +55,11 @@ fn repair_description_mentions_wpa2() {
     );
 }
 
-// --- S10: WPA2-only AP (Henry's place) — no repair needed ---
+// --- S10: WPA2-only AP (a friend's place) — no repair needed ---
 
 #[test]
 fn wpa2_only_needs_no_repair() {
-    // Henry's attinternet is WPA2-Personal only — scanner returns Psk, no SaeTransition.
+    // The friend's attinternet is WPA2-Personal only — scanner returns Psk, no SaeTransition.
     // The driver bug doesn't apply; no repair should be recommended.
     let entries = vec![bss("attinternet", AuthMode::Psk)];
     assert!(

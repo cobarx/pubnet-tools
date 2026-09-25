@@ -2,26 +2,34 @@
 # Captures real command output from the current machine and network into a
 # named fixture directory. Run this at every new network environment.
 #
-# Usage: bash tests/fixtures/capture.sh <context-name>
+# Usage: bash tests/fixtures/capture.sh <context-name> [--keep-ssid NAME]...
 # Example: bash tests/fixtures/capture.sh airport-captive-macos
-#          bash tests/fixtures/capture.sh home-ethernet-linux
+#          bash tests/fixtures/capture.sh amtrak-train-linux --keep-ssid YourTrainWiFi
 #
-# Output is committed to git. See skills/empirical-fixtures for the full discipline.
+# Output is committed to git, so personal data (SSIDs, MACs, BSSIDs, hostname) is
+# scrubbed by scrub.sh before anything lands in the fixture tree; --keep-ssid spares a
+# public operator SSID. Other SSIDs come out as `STAND-IN SSID NN` placeholders.
+# See docs/decisions/2026-09-24-scrub-personal-data.md and skills/empirical-fixtures.
 
 set -euo pipefail
 
-CONTEXT="${1:?Usage: $0 <context-name>}"
-DIR="$(cd "$(dirname "$0")" && pwd)/$CONTEXT"
+CONTEXT="${1:?Usage: $0 <context-name> [--keep-ssid NAME]...}"
+shift
+HERE="$(cd "$(dirname "$0")" && pwd)"
+DIR="$HERE/$CONTEXT"
+SCRUB_ARGS=("$@")    # passed through to scrub.sh (--keep-ssid NAME)...
 
 if [[ -d "$DIR" ]]; then
     echo "Directory $DIR already exists — files will be overwritten."
 fi
-mkdir -p "$DIR"
+# Capture into a staging dir; only scrubbed, verified output is moved into $DIR.
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
 
 # Silently skip commands that aren't available or fail on this platform
 run() {
     local label="$1"; shift
-    "$@" > "$DIR/${label}.txt" 2>/dev/null || true
+    "$@" > "$STAGE/${label}.txt" 2>/dev/null || true
 }
 
 OS="$(uname -s)"
@@ -67,9 +75,15 @@ else
     echo "Warning: unsupported OS $OS — no commands captured"
 fi
 
-# Prompt for a short description to put in the notes field
+echo "Scrubbing personal data..."
+SCRUBBED="$(bash "$HERE/scrub.sh" "$STAGE" "$CONTEXT" "${SCRUB_ARGS[@]+"${SCRUB_ARGS[@]}"}")"
+mkdir -p "$DIR"
+mv "$STAGE"/* "$DIR"/
+
+# Prompt for a short description to put in the notes field. It is free text and is
+# not scrubbed: describe the network, not the people on it.
 echo ""
-read -r -p "Short notes for this capture (network type, what's notable): " NOTES
+read -r -p "Short notes for this capture (network type, what's notable; no names): " NOTES
 
 cat > "$DIR/meta.toml" <<META
 context      = "$CONTEXT"
@@ -77,6 +91,7 @@ captured_at  = "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 os           = "$(uname -s) $(uname -r)"
 interface    = "$IFACE"
 notes        = "$NOTES"
+scrubbed     = "$SCRUBBED"
 META
 
 echo ""
