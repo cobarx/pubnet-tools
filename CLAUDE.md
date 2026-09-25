@@ -226,7 +226,9 @@ same build+package matrix without publishing, for a dry run. See
   *real capture*, never hand-typed — see
   [the `empirical-fixtures` skill](~/Code/MetanoiaFramework/skills/empirical-fixtures/SKILL.md).
   `crates/pubnetchk/tests/fixtures/capture.sh <context>` captures a new environment (Linux/macOS);
-  output is committed. `crates/pubnetchk/tests/fixtures/NEEDED.md` tracks gaps. Windows has no fixtures —
+  output is committed. `crates/pubnetchk/tests/fixtures/NEEDED.md` tracks gaps. Notes on
+  a captured network go in a `README.md` beside its capture, written as a dated snapshot
+  (one vehicle or venue, one day), not as the network's policy. Windows has no fixtures —
   its probes call the Win32 API and parse no command output, so its coverage is the
   contract tests plus pure mapping unit tests.
 - **Personal data is scrubbed, with obviously fake stand-ins.** Nothing committed or posted
@@ -328,6 +330,8 @@ same build+package matrix without publishing, for a dry run. See
   - [nat-traversal.md](docs/context/nat-traversal.md) — how Tailscale punches through NAT; DERP relay fallback
   - [tailscale-wireguard-handshake.md](docs/context/tailscale-wireguard-handshake.md) — WireGuard Noise_IKpsk2 handshake walkthrough
   - [wpa3-driver-compatibility.md](docs/context/wpa3-driver-compatibility.md) — WPA3/SAE driver failure on Intel AC 9560 against AT&T transition-mode AP; motivating incident for `wifi-auth-protocol-detection`
+- [crates/pubnetchk/tests/fixtures/](crates/pubnetchk/tests/fixtures/): captured networks, one
+  directory each: raw command output, `meta.toml`, and a `README.md` of notes where there are any
 - [docs/runbooks/](docs/runbooks/): step-by-step fixes for problems seen in the field
   - [captive-portal-not-appearing.md](docs/runbooks/captive-portal-not-appearing.md): sign-in page missing on a Linux desktop (NM connectivity checking off, browser HTTPS upgrades, subnet overlap, VPN/DoH)
 - [docs/epics/](docs/epics/) — epic + ticket breakdown for multi-PR features; source of truth for planned work
