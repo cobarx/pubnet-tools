@@ -324,6 +324,7 @@ same build+package matrix without publishing, for a dry run. See
   - [2026-09-13-release-automation-github-actions.md](docs/decisions/2026-09-13-release-automation-github-actions.md) — `.github/workflows/release.yml`: hand-rolled build matrix over `cargo-dist`, why Windows builds GNU not MSVC, why Android ships `assembleDebug`
   - [2026-09-24-scrub-personal-data.md](docs/decisions/2026-09-24-scrub-personal-data.md): personal data scrubbed from everything committed or posted, with obviously fake stand-ins; `scrub.sh` does it at capture time with default-deny verification
   - [2026-09-24-acceptable-network-probing.md](docs/decisions/2026-09-24-acceptable-network-probing.md): what probing a network is acceptable; content filtering tested with mainstream sites and designated test domains, real adult/gambling sites opt-in after reading the network's terms, piracy sites never provided
+  - [2026-09-24-output-locations.md](docs/decisions/2026-09-24-output-locations.md): where written files go, by who reads them: `--save` JSON in the platform's data directory (XDG / Application Support / Local AppData), `--html` and `record` in the current directory, script logs in `$XDG_STATE_HOME`
 - [docs/epics/](docs/epics/) — multi-ticket bodies of work: `<slug>/epic.md` + `tickets/NNN-*.md`
 - [docs/context/](docs/context/) — observed network behavior and domain background;
   read when debugging a check that misbehaves on a specific network

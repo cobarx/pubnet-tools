@@ -9,6 +9,10 @@ related: [save-off-by-default]
 
 # Decision: A plain-language HTML report (`--html` / `--open`), self-contained, opened via `xdg-open`
 
+> **Location superseded (2026-09-24) by
+> [output-locations](2026-09-24-output-locations.md)**: it moves `--html` to the current directory, from `~/.pubnetchk/reports/`. The rest of
+> this decision stands.
+
 ## Context
 
 The terminal and `--json` views both assume a reader who knows what a gateway,
