@@ -34,8 +34,11 @@ route may run other equipment, and operators change portals, filters, and caps w
    public resolvers and DoH; ICMP to `1.1.1.1` and `8.8.8.8`. Respect each service's terms, and
    never generate load a network or service would call abuse.
 
-6. **Test content filtering by resolving, not visiting.** Compare the network's DNS answer with
-   DoH for each category name. Fetch only a sinkhole's own block page, never the filtered site.
+6. **Test filtering only as far as the acceptable-probing decision allows.** Mainstream sites
+   and designated test domains: compare the network's DNS answer with DoH, then complete a TLS
+   handshake that sends no request, since a lookup alone sees only DNS filtering. Real adult or
+   gambling sites only if the dev opts in after reading the network's terms; piracy sites
+   never. Fetch only a block page the network itself serves.
 
 7. **Label inferences with their evidence.** Vendor from a MAC OUI, backhaul from a DHCP
    search domain or an egress range: say "likely", and say why. A guess stated as fact becomes
