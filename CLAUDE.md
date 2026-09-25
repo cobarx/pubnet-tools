@@ -328,6 +328,8 @@ same build+package matrix without publishing, for a dry run. See
   - [nat-traversal.md](docs/context/nat-traversal.md) — how Tailscale punches through NAT; DERP relay fallback
   - [tailscale-wireguard-handshake.md](docs/context/tailscale-wireguard-handshake.md) — WireGuard Noise_IKpsk2 handshake walkthrough
   - [wpa3-driver-compatibility.md](docs/context/wpa3-driver-compatibility.md) — WPA3/SAE driver failure on Intel AC 9560 against AT&T transition-mode AP; motivating incident for `wifi-auth-protocol-detection`
+- [docs/runbooks/](docs/runbooks/): step-by-step fixes for problems seen in the field
+  - [captive-portal-not-appearing.md](docs/runbooks/captive-portal-not-appearing.md): sign-in page missing on a Linux desktop (NM connectivity checking off, browser HTTPS upgrades, subnet overlap, VPN/DoH)
 - [docs/epics/](docs/epics/) — epic + ticket breakdown for multi-PR features; source of truth for planned work
   - [wifi-auth-protocol/epic.md](docs/epics/wifi-auth-protocol/epic.md) — Wi-Fi auth protocol detection (WPA2-PSK vs WPA3-SAE vs transition mode); **abandoned** — superseded by pubnetdiag
   - [pubnetdiag/epic.md](docs/epics/pubnetdiag/epic.md) — Wi-Fi AP scanner binary (`pubnetdiag`); BSS scan + RSN IE parser + `--repair`; 4 tickets, 21 pts
