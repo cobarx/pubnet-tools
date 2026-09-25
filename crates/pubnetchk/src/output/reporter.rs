@@ -81,14 +81,14 @@ pub async fn save_report(report: &Report, reports_dir: &Path) -> std::io::Result
     Ok(path)
 }
 
-/// Writes the plain-language HTML report to
-/// ~/.pubnetchk/reports/<timestamp>.html and returns the path. Unlike the
+/// Writes the plain-language HTML report to <dir>/pubnetchk-<timestamp>.html
+/// and returns the path; the CLI passes the current directory
+/// (docs/decisions/2026-09-24-output-locations.md). Unlike the
 /// JSON report this is always self-contained (inline CSS, no assets), so the
 /// returned path can be handed straight to `xdg-open`.
-pub async fn save_html_report(report: &Report, reports_dir: &Path) -> std::io::Result<PathBuf> {
-    tokio::fs::create_dir_all(reports_dir).await?;
-    let filename = format!("{}.html", report.timestamp.replace(':', "-"));
-    let path = reports_dir.join(filename);
+pub async fn save_html_report(report: &Report, dir: &Path) -> std::io::Result<PathBuf> {
+    let filename = format!("pubnetchk-{}.html", report.timestamp.replace(':', "-"));
+    let path = dir.join(filename);
     let html = crate::output::html::render_html(report);
     tokio::fs::write(&path, html).await?;
     Ok(path)
@@ -209,6 +209,26 @@ mod tests {
         assert!(
             default_reports_dir().ends_with("pubnet-tools/reports")
                 || default_reports_dir().ends_with("com.cobarx.pubnet-tools/reports")
+        );
+    }
+
+    // docs/decisions/2026-09-24-output-locations.md: a document lands where the person
+    // is, named for the tool that wrote it.
+    #[tokio::test]
+    async fn writes_html_report_into_the_given_dir_named_for_the_tool() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let path = save_html_report(&fake_report(), dir.path()).await.unwrap();
+
+        assert_eq!(
+            path,
+            dir.path().join("pubnetchk-2026-08-24T12-34-56.789Z.html")
+        );
+        assert!(
+            tokio::fs::read_to_string(&path)
+                .await
+                .unwrap()
+                .contains("<html")
         );
     }
 

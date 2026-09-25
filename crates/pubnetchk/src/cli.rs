@@ -21,7 +21,7 @@ struct Cli {
     #[arg(long)]
     save: bool,
     /// write a plain-language HTML report (the "show your family" view) to
-    /// ~/.pubnetchk/reports/ and print its path
+    /// the current directory and print its path
     #[arg(long)]
     html: bool,
     /// open the HTML report in your default browser when done (implies --html)
@@ -297,7 +297,7 @@ async fn run_command(cli: &Cli) -> i32 {
     // --open implies --html: opening a report you never generated is
     // meaningless, so the friendlier reading is "generate it, then open it".
     if cli.html || cli.open {
-        match save_html_report(&report, &default_reports_dir()).await {
+        match save_html_report(&report, &working_dir()).await {
             Ok(path) => {
                 if !cli.json {
                     println!("HTML report: {}", path.display());
@@ -399,25 +399,25 @@ async fn record_command_unix() -> i32 {
         return 1;
     };
 
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let timestamp = now_iso8601().replace(':', "-");
     let timestamp = timestamp.split('.').next().unwrap_or(&timestamp);
-    let recordings_dir = format!("{home}/.pubnetchk/recordings");
-    let path = format!("{recordings_dir}/{timestamp}.cast");
-    let _ = exec_cmd(cmd(&["mkdir", "-p", &recordings_dir])).await;
+    let path = working_dir()
+        .join(format!("pubnetchk-{timestamp}.cast"))
+        .display()
+        .to_string();
 
     let args: Vec<String> = if version >= 3 {
         vec![
             "rec".to_string(),
             "--output".to_string(),
-            path,
+            path.clone(),
             "--".to_string(),
             "pubnetchk".to_string(),
         ]
     } else {
         vec![
             "rec".to_string(),
-            path,
+            path.clone(),
             "--".to_string(),
             "pubnetchk".to_string(),
         ]
@@ -431,10 +431,19 @@ async fn record_command_unix() -> i32 {
         .status()
         .await;
 
+    if std::path::Path::new(&path).exists() {
+        println!("Recording: {path}");
+    }
     match status {
         Ok(s) => s.code().unwrap_or(0),
         Err(_) => 1,
     }
+}
+
+/// Where documents a person opens (the HTML report, recordings) are written
+/// (docs/decisions/2026-09-24-output-locations.md).
+fn working_dir() -> std::path::PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
 }
 
 pub async fn run() {
