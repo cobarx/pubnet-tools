@@ -1,0 +1,31 @@
+Global
+           Protocols: +LLMNR +mDNS -DNSOverTLS DNSSEC=no/unsupported
+    resolv.conf mode: foreign
+Fallback DNS Servers: 9.9.9.9#dns.quad9.net 2620:fe::9#dns.quad9.net
+                      1.1.1.1#cloudflare-dns.com
+                      2606:4700:4700::1111#cloudflare-dns.com 8.8.8.8#dns.google
+                      2001:4860:4860::8888#dns.google
+          DNS Domain: myverizon
+
+Link 5 (docker0)
+    Current Scopes: none
+         Protocols: -DefaultRoute +LLMNR +mDNS -DNSOverTLS DNSSEC=no/unsupported
+     Default Route: no
+
+Link 3 (vmnet1)
+    Current Scopes: LLMNR/IPv4 LLMNR/IPv6 mDNS/IPv4 mDNS/IPv6
+         Protocols: -DefaultRoute +LLMNR +mDNS -DNSOverTLS DNSSEC=no/unsupported
+     Default Route: no
+
+Link 2 (wlan0)
+    Current Scopes: DNS LLMNR/IPv4 LLMNR/IPv6 mDNS/IPv4 mDNS/IPv6
+         Protocols: +DefaultRoute +LLMNR +mDNS -DNSOverTLS DNSSEC=no/unsupported
+Current DNS Server: 192.168.1.1
+       DNS Servers: 192.168.1.1
+        DNS Domain: myverizon
+     Default Route: yes
+
+Link 4 (vmnet8)
+    Current Scopes: LLMNR/IPv4 LLMNR/IPv6 mDNS/IPv4 mDNS/IPv6
+         Protocols: -DefaultRoute +LLMNR +mDNS -DNSOverTLS DNSSEC=no/unsupported
+     Default Route: no

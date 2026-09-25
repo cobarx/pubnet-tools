@@ -1,0 +1,6 @@
+context      = "amtrak-train-linux"
+captured_at  = "2026-09-24T19:43:25Z"
+os           = "Linux 7.2.2-1-cachyos"
+interface    = "wlan0"
+notes        = "Amtrak Capitol Corridor on-train WiFi (open 2.4GHz, gateway 10.6.0.1/21), train 530 San Jose to Sacramento, near Martinez/Suisun. Captured after captive-portal admission (all OS probes pass)."
+scrubbed     = "1 SSID(s) -> STAND-IN placeholders, 1 own MAC(s), 1 other MAC(s)/BSSID(s); kept SSID(s): YourTrainWiFi"
