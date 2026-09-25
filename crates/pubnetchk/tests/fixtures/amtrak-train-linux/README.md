@@ -65,17 +65,24 @@ Filtering is **DNS-only**. The train resolver answers blocked names with a sinkh
 since the sinkhole has no cert for the name). Reaching the real IP (from DoH, or by
 `--resolve`) returns the origin's own response, so there is no IP- or SNI-level blocking.
 
-| Category | Tested | Result |
+These tests predate the acceptable-probing decision
+([2026-09-24](../../../../../docs/decisions/2026-09-24-acceptable-network-probing.md)): they
+looked up real sites in each category, and two header-only requests went to piracy sites
+to show the filtering was DNS-only. The names are not listed here. Under the decision,
+adult and gambling tests are opt-in, piracy is out, and a TLS handshake that sends no
+request would answer the "DNS-only?" question instead.
+
+| Category | Examples tested | Result |
 |---|---|---|
-| Adult | pornhub.com, xvideos.com | Sinkholed |
-| Piracy / torrent indexes | thepiratebay.org, 1337x.to, nyaa.si | Sinkholed |
-| Imageboards | 4chan.org | Sinkholed |
-| BitTorrent tracker | tracker.opentrackr.org | Resolves; HTTP 200 |
+| Adult | real sites (not listed) | Sinkholed |
+| Piracy / torrent indexes | real sites (not listed) | Sinkholed |
+| Imageboards | a real site (not listed) | Sinkholed |
+| BitTorrent tracker | a public tracker (not listed) | Resolves; HTTP 200 |
 | BitTorrent ports | 6881, 51413 (TCP) | Open |
 | Video/music streaming | YouTube, googlevideo, Netflix, Twitch, Hulu, Disney+, TikTok, Spotify | Resolves normally, not blocked (throttling after the usage cap is the practical limit) |
 | Social | Facebook, Reddit, Discord | Not blocked |
 | VPN / anonymity | nordvpn.com, mullvad.net, torproject.org | Not blocked (sites); VPN protocols untested beyond TCP 1194/1723 being open |
-| Gambling | draftkings.com | Not blocked |
+| Gambling | a real site (not listed) | Not blocked |
 
 Other names resolve to different but legitimate CDN addresses than DoH gives, which
 is normal geo/anycast variation, not interception.
