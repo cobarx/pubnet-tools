@@ -322,6 +322,7 @@ same build+package matrix without publishing, for a dry run. See
   - [2026-09-04-single-suite-version.md](docs/decisions/2026-09-04-single-suite-version.md) — one version for the whole suite in `[workspace.package]`; crates inherit it, the Android app derives `versionName`/`versionCode` from it
   - [2026-09-13-release-automation-github-actions.md](docs/decisions/2026-09-13-release-automation-github-actions.md) — `.github/workflows/release.yml`: hand-rolled build matrix over `cargo-dist`, why Windows builds GNU not MSVC, why Android ships `assembleDebug`
   - [2026-09-24-scrub-personal-data.md](docs/decisions/2026-09-24-scrub-personal-data.md): personal data scrubbed from everything committed or posted, with obviously fake stand-ins; `scrub.sh` does it at capture time with default-deny verification
+  - [2026-09-24-acceptable-network-probing.md](docs/decisions/2026-09-24-acceptable-network-probing.md): what probing a network is acceptable; content filtering tested with mainstream sites and designated test domains, real adult/gambling sites opt-in after reading the network's terms, piracy sites never provided
 - [docs/epics/](docs/epics/) — multi-ticket bodies of work: `<slug>/epic.md` + `tickets/NNN-*.md`
 - [docs/context/](docs/context/) — observed network behavior and domain background;
   read when debugging a check that misbehaves on a specific network
