@@ -111,7 +111,7 @@ Common options:
 
 ```bash
 pubnetchk --json | jq .        # JSON to stdout (pipe-friendly, no spinners)
-pubnetchk --save               # also write a JSON report to ~/.pubnetchk/reports/
+pubnetchk --save               # also write a JSON report (path below) and print where
 pubnetchk --html --open        # write a plain-language HTML report and open it
 pubnetchk -q                   # quick mode: shorter speed test
 pubnetchk -v                   # add per-target reliability detail
@@ -122,6 +122,14 @@ pubnetchk record               # wrap the run in asciinema for session capture
 ```
 
 Full flag reference: `pubnetchk --help`.
+
+`--save` keeps its reports in your per-user data directory:
+
+| Platform | Reports |
+|---|---|
+| Linux | `~/.local/share/pubnet-tools/reports/` (under `$XDG_DATA_HOME` if set) |
+| macOS | `~/Library/Application Support/com.cobarx.pubnet-tools/reports/` |
+| Windows | `%LOCALAPPDATA%\pubnet-tools\reports\` |
 
 ## Platform support
 
