@@ -9,6 +9,10 @@ related: []
 
 # Decision: Report saving is opt-in (`--save`), not opt-out (`--no-save`)
 
+> **Location superseded (2026-09-24) by
+> [output-locations](2026-09-24-output-locations.md)**: it moves `--save` to the platform's per-user data directory, from `~/.pubnetchk/reports/` (or `~/.conncheck/`). The rest of
+> this decision stands.
+
 ## Context
 
 Since the original `PLAN.md`, conncheck has saved a JSON report to
