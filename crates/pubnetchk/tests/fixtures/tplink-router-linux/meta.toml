@@ -1,0 +1,6 @@
+context      = "tplink-router-linux"
+captured_at  = "2026-09-25T21:04:40Z"
+os           = "Linux 7.2.2-1-cachyos"
+interface    = "wlan0"
+notes        = "Cafe guest Wi-Fi: likely TP-Link router (BSSID and gateway MAC share the TP-Link OUI, gateway MAC = BSSID+1); WPA2, 5 GHz ch 149, 192.168.0.0/24, router is the DNS server; sign-in state: no captive portal (joined with the WPA2 password only, no splash page; NM connectivity full, generate_204 returned 204)"
+scrubbed     = "21 SSID(s) -> STAND-IN placeholders (the network under study then renamed by hand to the stand-in \"Chico Coffee Shop\"), 1 own MAC(s), 2 other MAC(s)/BSSID(s), 1 IPv6 prefix(es)"
