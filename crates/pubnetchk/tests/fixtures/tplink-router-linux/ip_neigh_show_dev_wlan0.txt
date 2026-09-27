@@ -1,0 +1,2 @@
+192.168.0.1 lladdr 6c:5a:b0:00:00:01 REACHABLE 
+fe80::8b2:84b9:5c0d:522 lladdr f4:34:f0:00:00:02 router STALE 
