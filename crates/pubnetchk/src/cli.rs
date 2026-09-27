@@ -16,7 +16,8 @@ struct Cli {
     /// print JSON to stdout, suppress spinners
     #[arg(long)]
     json: bool,
-    /// write the report to ~/.pubnetchk/reports/ (off by default)
+    /// write a JSON report to your data dir and print its path (off by default);
+    /// Linux: ~/.local/share/pubnet-tools/reports/ ($XDG_DATA_HOME if set)
     #[arg(long)]
     save: bool,
     /// write a plain-language HTML report (the "show your family" view) to

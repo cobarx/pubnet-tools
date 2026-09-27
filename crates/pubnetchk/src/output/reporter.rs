@@ -1,16 +1,62 @@
 //! Port of src/output/reporter.ts: saves JSON report to
-//! ~/.pubnetchk/reports/<timestamp>.json, only when --save is passed
-//! (see docs/decisions/2026-08-25-save-off-by-default.md).
+//! <data dir>/reports/<timestamp>.json, only when --save is passed
+//! (see docs/decisions/2026-08-25-save-off-by-default.md). The data dir is
+//! the platform's per-user one (docs/decisions/2026-09-24-output-locations.md).
 
 use crate::types::Report;
 use std::path::{Path, PathBuf};
 
 pub fn default_reports_dir() -> PathBuf {
-    dirs_home().join(".pubnetchk").join("reports")
+    data_dir().join("reports")
+}
+
+#[cfg(target_os = "macos")]
+fn data_dir() -> PathBuf {
+    macos_data_dir(&dirs_home())
+}
+
+#[cfg(windows)]
+fn data_dir() -> PathBuf {
+    windows_data_dir(std::env::var("LOCALAPPDATA").ok(), &dirs_home())
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn data_dir() -> PathBuf {
+    xdg_data_dir(std::env::var("XDG_DATA_HOME").ok(), &dirs_home())
+}
+
+/// XDG Base Directory spec 0.8: `$XDG_DATA_HOME`, else `~/.local/share`. A relative
+/// value "should [be considered] invalid and ignore[d]".
+#[cfg(any(not(any(target_os = "macos", windows)), test))]
+fn xdg_data_dir(xdg_data_home: Option<String>, home: &Path) -> PathBuf {
+    xdg_data_home
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| home.join(".local").join("share"))
+        .join("pubnet-tools")
+}
+
+/// Apple: Application Support, in a subdirectory named by bundle identifier.
+#[cfg(any(target_os = "macos", test))]
+fn macos_data_dir(home: &Path) -> PathBuf {
+    home.join("Library")
+        .join("Application Support")
+        .join("com.cobarx.pubnet-tools")
+}
+
+/// Microsoft KNOWNFOLDERID: `FOLDERID_LocalAppData`, default
+/// `%USERPROFILE%\AppData\Local`. Local, not Roaming: a report is about this machine.
+#[cfg(any(windows, test))]
+fn windows_data_dir(local_appdata: Option<String>, home: &Path) -> PathBuf {
+    local_appdata
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join("AppData").join("Local"))
+        .join("pubnet-tools")
 }
 
 fn dirs_home() -> PathBuf {
-    // No `dirs` crate dependency for one lookup. $HOME covers Linux/macOS
+    // No `dirs` crate (see docs/decisions/2026-09-24-output-locations.md). $HOME covers Linux/macOS
     // (and Git Bash on Windows); %USERPROFILE% is the native-Windows home.
     home_from(
         std::env::var("HOME").ok(),
@@ -104,6 +150,66 @@ mod tests {
         );
         assert_eq!(home_from(Some(String::new()), None), PathBuf::from("."));
         assert_eq!(home_from(None, None), PathBuf::from("."));
+    }
+
+    // docs/decisions/2026-09-24-output-locations.md: the per-user data directory.
+    // "/data" is not absolute on Windows (no drive), so the XDG cases are Unix-only.
+    #[cfg(unix)]
+    #[test]
+    fn linux_uses_xdg_data_home_when_absolute() {
+        assert_eq!(
+            xdg_data_dir(Some("/data".into()), Path::new("/home/x")),
+            PathBuf::from("/data/pubnet-tools")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_ignores_an_unset_empty_or_relative_xdg_data_home() {
+        let default = PathBuf::from("/home/x/.local/share/pubnet-tools");
+        assert_eq!(xdg_data_dir(None, Path::new("/home/x")), default);
+        assert_eq!(
+            xdg_data_dir(Some(String::new()), Path::new("/home/x")),
+            default
+        );
+        assert_eq!(
+            xdg_data_dir(Some("data".into()), Path::new("/home/x")),
+            default
+        );
+    }
+
+    #[test]
+    fn macos_uses_application_support_by_bundle_id() {
+        assert_eq!(
+            macos_data_dir(Path::new("/Users/x")),
+            PathBuf::from("/Users/x/Library/Application Support/com.cobarx.pubnet-tools")
+        );
+    }
+
+    #[test]
+    fn windows_uses_local_appdata_else_its_default_under_the_profile() {
+        assert_eq!(
+            windows_data_dir(
+                Some("C:\\Users\\x\\AppData\\Local".into()),
+                Path::new("C:\\Users\\x")
+            ),
+            PathBuf::from("C:\\Users\\x\\AppData\\Local").join("pubnet-tools")
+        );
+        assert_eq!(
+            windows_data_dir(None, Path::new("C:\\Users\\x")),
+            PathBuf::from("C:\\Users\\x")
+                .join("AppData")
+                .join("Local")
+                .join("pubnet-tools")
+        );
+    }
+
+    #[test]
+    fn reports_live_in_the_data_dir() {
+        assert!(
+            default_reports_dir().ends_with("pubnet-tools/reports")
+                || default_reports_dir().ends_with("com.cobarx.pubnet-tools/reports")
+        );
     }
 
     #[tokio::test]

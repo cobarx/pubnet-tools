@@ -85,7 +85,9 @@ pubnet-tools/
           speed.rs         NDT7 (M-Lab) client over tokio-tungstenite, hand-rolled protocol
         output/
           renderer.rs      console only, condensed Network/Security/Performance sections, never calls network
-          reporter.rs      writes JSON to ~/.pubnetchk/reports/<timestamp>.json (only with --save)
+          reporter.rs      writes JSON to <data dir>/reports/<timestamp>.json (only with --save);
+                           data dir is XDG / Application Support / Local AppData
+                           (docs/decisions/2026-09-24-output-locations.md)
       tests/               contract tests (one real system boundary each, no mocks)
         fixtures/          empirical captures; capture.sh adds new environments
     pubnetdiag/            pubnetdiag binary — Wi-Fi AP scanner (stub; see epic #14)
