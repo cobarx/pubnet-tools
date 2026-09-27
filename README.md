@@ -123,7 +123,8 @@ pubnetchk record               # wrap the run in asciinema for session capture
 
 Full flag reference: `pubnetchk --help`.
 
-`--save` keeps its reports in your per-user data directory:
+`--html` and `record` write to the current directory (`pubnetchk-<timestamp>.html` / `.cast`)
+and print the path. `--save` keeps its reports in your per-user data directory:
 
 | Platform | Reports |
 |---|---|
