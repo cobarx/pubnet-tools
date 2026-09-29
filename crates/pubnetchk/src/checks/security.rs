@@ -392,8 +392,10 @@ pub async fn check_security<P: PlatformProbe>(
             points: 0,
             title: "Wi-Fi network name (SSID) hidden by the OS".to_string(),
             detail: Some(
-                "macOS withholds the SSID from command-line tools unless the terminal has \
-                 Location Services access (System Settings ▸ Privacy & Security ▸ Location Services)."
+                "macOS 15+ hides the SSID from any process that hasn't itself requested \
+                 Location Services authorization — a plain terminal command can't obtain \
+                 that grant the way a signed app can, so this may not be fixable from \
+                 System Settings. Run `pubnetchk permissions` for what's actually checkable."
                     .to_string(),
             ),
         });

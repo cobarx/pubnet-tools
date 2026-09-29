@@ -36,9 +36,10 @@ What each permission-free, non-root source actually returns (measured on macOS 2
 | `wdutil info` | fast | `<redacted>`\* | yes | yes | — **requires `sudo`** |
 | CoreWLAN (`CWInterface`) | instant | `<redacted>`\* | yes | yes | — needs an Obj-C binding |
 
-\* the real value appears only if the terminal app has been granted Location Services
-access. `-detailLevel mini` does not speed `system_profiler` up; the delay is the
-network scan it always performs.
+\* the real value appears only if the calling process holds Location Services
+authorization — see the 2026-09-04 correction below for what that actually requires.
+`-detailLevel mini` does not speed `system_profiler` up; the delay is the network scan
+it always performs.
 
 ## Decision
 
@@ -129,6 +130,29 @@ macOS probe (PR #1); the fast/slow split and the `--wifi-detail` flags are new s
 - **Non-`en0` Wi-Fi interfaces.** Today: `iface` comes from the default route, and both
   commands are scoped to it. Revisit if: a machine with two Wi-Fi interfaces reads the
   wrong one.
+
+## Correction (2026-09-04)
+
+This doc originally implied the SSID redaction was fixable by "granting the terminal
+app Location Services access" via System Settings — worded that way in the finding
+text, the renderer/HTML hints, and `tests/fixtures/NEEDED.md`'s capture instructions.
+Tested empirically against both Terminal.app and a third-party terminal (Ghostty):
+**neither ever appears in the Location Services app list at all**, so there is no
+per-app toggle to flip. macOS only adds a process to that list when the process itself
+calls CoreLocation's authorization API (e.g. `requestWhenInUseAuthorization`) — no
+terminal emulator does this, and a plain CLI shelled out from one has no way to trigger
+it either. This is a stricter version of the constraint the original decision already
+named ("a CLI that is not an app bundle cannot obtain one") — it turns out the
+*terminal itself* can't obtain one either, so pointing users at Location Services
+settings was not just currently-unavailable but actively misleading.
+
+The finding text and renderer/HTML hints were corrected to stop promising a Settings
+fix. `pubnetchk permissions` (`docs/specs/permissions-helper.md`) exists to report the
+current state and name the actual (still unimplemented) fix — embedding CoreLocation
+into the binary — tracked as
+[issue #48](https://github.com/cobarx/pubnet-tools/issues/48). Whether the
+System Settings ▸ Location Services ▸ System Services ▸ "Wi-Fi Networking" toggle
+(system-wide, not per-app) affects this remains unconfirmed.
 
 ## Consequences
 

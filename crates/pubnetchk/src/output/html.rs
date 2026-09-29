@@ -262,8 +262,7 @@ fn render_facts(report: &Report) -> String {
         } else if on_wifi {
             rows.push((
                 "Network name".to_string(),
-                "Hidden by the OS (grant your terminal Location Services access to show it)"
-                    .to_string(),
+                "Hidden by the OS (run `pubnetchk permissions` for details)".to_string(),
             ));
             rows.push((
                 "WiFi protection".to_string(),

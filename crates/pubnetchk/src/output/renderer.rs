@@ -123,7 +123,7 @@ fn render_network_section(report: &Report) -> Vec<String> {
             match &sec.ssid {
                 Some(ssid) => lines.push(format!("  SSID: {} — {}", ssid, sec.encryption.as_str())),
                 None => lines.push(format!(
-                    "  SSID: hidden by the OS — {} (macOS: grant your terminal Location Services access)",
+                    "  SSID: hidden by the OS — {} (run `pubnetchk permissions` for details)",
                     sec.encryption.as_str()
                 )),
             }

@@ -5,6 +5,8 @@ pub use pubnet_platform::{exec, network, platform};
 
 pub mod audit;
 pub mod checks;
+#[cfg(target_os = "macos")]
+mod macos_location;
 pub mod output;
 pub mod scoring;
 mod tls;

@@ -60,3 +60,13 @@ tokio-tungstenite = { version = "0.30.0" }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+
+# `pubnetchk permissions --request` — requesting macOS Location Services
+# authorization so this bare CLI binary can appear in System Settings' app
+# list like a real .app would (see docs/decisions/2026-09-04-macos-location-authorization-request.md
+# and issue #48). Paired with build.rs's embedded Info.plist section.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10.1"
+objc2 = "0.6.4"
+objc2-core-location = "0.3.2"

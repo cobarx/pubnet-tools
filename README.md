@@ -115,6 +115,7 @@ pubnetchk --no-speed           # skip a check (also --no-topology/--no-security/
 pubnetchk --only security,speed # run only the named checks (topology,security,reliability,speed)
 pubnetchk --strict             # exit non-zero on Medium/High risk (for scripts)
 pubnetchk record               # wrap the run in asciinema for session capture
+pubnetchk permissions --open   # macOS: check the hidden-SSID state, jump to Settings (see below)
 ```
 
 Full flag reference: `pubnetchk --help`.
@@ -126,7 +127,10 @@ Full flag reference: `pubnetchk --help`.
 | WiFi SSID | &nbsp;✅&nbsp; | &nbsp;✅¹&nbsp; | &nbsp;✅&nbsp; | &nbsp;✅&nbsp; |
 | DNS-interception verdict | &nbsp;✅&nbsp; | &nbsp;🟡²&nbsp; | &nbsp;🟡²&nbsp; | &nbsp;🟡²&nbsp; |
 
-¹ Redacted unless you grant Location Services (macOS 15+).
+¹ Redacted on macOS 15+ with no reliable fix today (a terminal can't be granted
+Location Services access the way a real app can — see
+[#48](https://github.com/cobarx/pubnet-tools/issues/48)); run `pubnetchk permissions`
+for the current state and what's actually worth trying.
 ² Reports `uncertain` rather than `clean`/`leaked` — no egress-IP read on this platform.
 
 The Android app (a UniFFI-wrapped build of the same engine, no CLI) is in progress —
