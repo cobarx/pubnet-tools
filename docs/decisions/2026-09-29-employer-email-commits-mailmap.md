@@ -65,7 +65,8 @@ To stop new commits picking up the work email, the repo's own config now sets
 
 - Commits keep the employer email in their objects. Tools that ignore `.mailmap`
   (GitHub's commit view among them) still show it; this record is the explanation.
-- The global git config on this machine still has the work email, so another repo
-  here without its own `user.email` will commit under it.
+- The global git config on this machine had the work email when this was decided.
+  The author changed it to the personal address later on 2026-09-29, so other repos
+  on this machine no longer pick up the employer email.
 - The pre-scrub `home-wifi-macos` capture, which provides the hardware-address
   evidence, remains in history. The addresses themselves are not repeated here.
