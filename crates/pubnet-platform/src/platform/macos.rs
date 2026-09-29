@@ -442,10 +442,18 @@ impl PlatformProbe for MacProbe {
 mod tests {
     use super::*;
 
-    // Fixture helpers — load real captured output from tests/fixtures/<context>/<file>
+    // Fixture helpers — load real captured output from
+    // crates/pubnetchk/tests/fixtures/<context>/<file>. The corpus lives in the
+    // pubnetchk crate (see CLAUDE.md's Architecture section); this crate's
+    // module just reaches across to it rather than duplicating the fixtures.
     macro_rules! fixture {
         ($context:literal, $file:literal) => {
-            include_str!(concat!("../../tests/fixtures/", $context, "/", $file))
+            include_str!(concat!(
+                "../../../pubnetchk/tests/fixtures/",
+                $context,
+                "/",
+                $file
+            ))
         };
     }
 
